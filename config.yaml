@@ -1,0 +1,105 @@
+slack:
+  webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+  channel: "#akash-oracle-monitoring"
+
+# Component 1: Oracle Price Health
+oracle_price_monitor:
+  enabled: true
+  poll_interval: 60s
+  thresholds:
+    warning_age: 5m
+    critical_age: 15m
+    emergency_age: 30m
+
+# Component 2: Hermes Relayer Health
+hermes_health_monitor:
+  enabled: true
+  poll_interval: 30s
+  consecutive_failures_threshold: 3
+
+# Component 3: Guardian Set Currency
+guardian_set_monitor:
+  enabled: true
+  poll_interval: 10m
+  # PublicNode is free with no API key — suitable for development and low-frequency polling.
+  # For production, replace with a dedicated RPC endpoint:
+  #   ethereum_rpc: "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+  ethereum_rpc: "https://ethereum-rpc.publicnode.com"
+  wormhole_contract: "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"
+
+# Component 5: Wormholescan Guardian Set Monitor
+# Reactive detection via Wormholescan REST API — complementary to Component 3 (Ethereum RPC).
+# Detects guardian set index changes and retrieves the signed governance VAA needed to
+# update the Akash Wormhole CosmWasm contract via submit_v_a_a.
+#
+# Runs alongside Component 3. Together they provide defense-in-depth:
+#   Component 3: Authoritative address-level verification (requires Ethereum RPC)
+#   Component 5: Index change detection + VAA retrieval (no Ethereum RPC needed)
+wormholescan_monitor:
+  enabled: true
+  poll_interval: 30m
+  # Public Wormholescan API — no API key required. Suitable for the low-frequency
+  # polling used here (index and VAA queries only).
+  api_base_url: "https://api.wormholescan.io"
+  # Standard Wormhole Core governance emitter on Ethereum chain 1.
+  # This address has been used for all guardian set upgrade VAAs since mainnet launch.
+  # Validated against decoded VAA payload: Action 0x02 (guardian set upgrade),
+  # payload confirms "Core" module at offset 0x60, target index at offset 0x76.
+  governance_emitter: "0000000000000000000000000000000000000000000000000000000000000004"
+
+# Component 6: BME (Burn Mint Equilibrium) Status Monitor
+# Monitors the health of the Akash token burn/mint mechanism.
+# Alerts when the collateral ratio approaches or breaches the warn/halt thresholds,
+# or when minting/refunds are halted by the chain.
+#
+# NOTE: warn_threshold and halt_threshold are NOT configured here — they are read
+# directly from the chain on each poll cycle (/akash/bme/v1/status). The monitor
+# automatically adjusts if governance changes these values.
+bme_monitor:
+  enabled: true
+  poll_interval: 60s
+
+# Component 4: Guardian Update Announcements
+announcement_monitor:
+  enabled: true
+  etherscan:
+    enabled: false  # future: on-chain tx monitoring (requires Etherscan API key)
+    api_key: "YOUR_ETHERSCAN_API_KEY"
+    poll_interval: 5m
+  pyth_forum:
+    enabled: true
+    url: "https://forum.pyth.network/c/proposals/7.rss"
+    poll_interval: 30m
+    keywords:
+      - "guardian"
+      - "guardian set"
+      - "wormhole core"
+      - "guardian rotation"
+      - "guardian key"
+  github:
+    enabled: false  # future: GitHub commit monitoring
+    repo: "wormhole-foundation/wormhole"
+    poll_interval: 1h
+
+networks:
+  - name: testnet-oracle
+    akash_api: "https://testnetoracleapi.akashnet.net"
+    hermes_relayers:
+      - name: hermes-relayer-01
+        health_endpoint: "https://hermesrelayer1.dev.akash.pub/health"
+        wallet: "akash1adfgt4twjtsfgjattq3gsaa9hrpzg0q4c55jtv"
+        min_wallet_balance: 100000000  # 100 AKT in uakt
+        expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+        expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
+      # - name: hermes-relayer-02
+      #   health_endpoint: "https://hermesrelayer2.dev.akash.pub/health"
+      #   wallet: "akash1..."
+      #   min_wallet_balance: 100000000
+      #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+      #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
+      # - name: hermes-relayer-03
+      #   health_endpoint: "https://hermesrelayer3.dev.akash.pub/health"
+      #   wallet: "akash1..."
+      #   min_wallet_balance: 100000000
+      #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+      #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
