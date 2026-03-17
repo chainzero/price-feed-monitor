@@ -12,6 +12,7 @@ import (
 
 	"github.com/akash-network/price-feed-monitor/internal/alerting"
 	"github.com/akash-network/price-feed-monitor/internal/config"
+	"github.com/akash-network/price-feed-monitor/internal/guardian"
 	"github.com/akash-network/price-feed-monitor/internal/types"
 )
 
@@ -71,6 +72,15 @@ func (r *Reporter) post(ctx context.Context, header string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Time: %s UTC\n\n", time.Now().UTC().Format("2006-01-02 15:04:05"))
 
+	// Fetch the Wormholescan global guardian set once — shared across all networks.
+	var globalGuardianIndex uint32
+	var globalGuardianAddresses []string
+	var globalGuardianErr error
+	if r.cfg.WormholescanMonitor.Enabled {
+		wsClient := guardian.NewWormholescanClient(r.cfg.WormholescanMonitor.APIBaseURL)
+		globalGuardianIndex, globalGuardianAddresses, globalGuardianErr = wsClient.GetCurrentGuardianSet(ctx)
+	}
+
 	for _, network := range r.cfg.Networks {
 		fmt.Fprintf(&b, "━━━ Network: %s ━━━\n\n", network.Name)
 
@@ -95,6 +105,20 @@ func (r *Reporter) post(ctx context.Context, header string) {
 			r.appendRelayerStatus(ctx, &b, network, relayer)
 		}
 		fmt.Fprintln(&b)
+
+		// BME status
+		if r.cfg.BMEMonitor.Enabled {
+			r.appendBMEStatus(ctx, &b, network.AkashAPI)
+		}
+
+		// Guardian set status
+		r.appendGuardianStatus(ctx, &b, network,
+			globalGuardianIndex, globalGuardianAddresses, globalGuardianErr)
+	}
+
+	// Pyth forum monitoring note
+	if r.cfg.AnnouncementMonitor.Enabled && r.cfg.AnnouncementMonitor.PythForum.Enabled {
+		fmt.Fprintf(&b, "\nPyth Forum: ✅ monitoring active (%s)\n", r.cfg.AnnouncementMonitor.PythForum.URL)
 	}
 
 	r.alerter.Post(header, b.String())
@@ -138,6 +162,119 @@ func (r *Reporter) appendRelayerStatus(
 				balanceIcon, balanceAKT, minAKT)
 		}
 	}
+}
+
+// reporterBMEStatus is a local mirror of the BME API response fields we need.
+type reporterBMEStatus struct {
+	Status         string `json:"status"`
+	CollateralRatio string `json:"collateral_ratio"`
+	WarnThreshold  string `json:"warn_threshold"`
+	HaltThreshold  string `json:"halt_threshold"`
+	MintsAllowed   bool   `json:"mints_allowed"`
+	RefundsAllowed bool   `json:"refunds_allowed"`
+}
+
+func (r *Reporter) appendBMEStatus(ctx context.Context, b *strings.Builder, akashAPI string) {
+	url := akashAPI + "/akash/bme/v1/status"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		fmt.Fprintf(b, "BME Status: ❌ request error (%s)\n\n", err)
+		return
+	}
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		fmt.Fprintf(b, "BME Status: ❌ unreachable (%s)\n\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(b, "BME Status: ❌ HTTP %d\n\n", resp.StatusCode)
+		return
+	}
+
+	var s reporterBMEStatus
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		fmt.Fprintf(b, "BME Status: ❌ decode error (%s)\n\n", err)
+		return
+	}
+
+	ratio, err := strconv.ParseFloat(s.CollateralRatio, 64)
+	if err != nil {
+		fmt.Fprintf(b, "BME Status: ❌ parse error (%s)\n\n", err)
+		return
+	}
+
+	warnThreshold, _ := strconv.ParseFloat(s.WarnThreshold, 64)
+	haltThreshold, _ := strconv.ParseFloat(s.HaltThreshold, 64)
+
+	// Choose icon based on ratio vs thresholds and operational flags
+	bmeIcon := "✅"
+	switch {
+	case !s.MintsAllowed || !s.RefundsAllowed || ratio < haltThreshold:
+		bmeIcon = "🔴"
+	case ratio < warnThreshold:
+		bmeIcon = "⚠️"
+	}
+
+	mintsIcon := "✅"
+	if !s.MintsAllowed {
+		mintsIcon = "🔴"
+	}
+	refundsIcon := "✅"
+	if !s.RefundsAllowed {
+		refundsIcon = "🔴"
+	}
+
+	fmt.Fprintf(b, "BME Status: %s %s  collateral ratio: %.1fx  (warn: %.2f  halt: %.2f)\n",
+		bmeIcon, s.Status, ratio, warnThreshold, haltThreshold)
+	fmt.Fprintf(b, "  Mints: %s  Refunds: %s\n\n", mintsIcon, refundsIcon)
+}
+
+func (r *Reporter) appendGuardianStatus(
+	ctx context.Context,
+	b *strings.Builder,
+	network config.NetworkConfig,
+	globalIndex uint32,
+	globalAddresses []string,
+	globalErr error,
+) {
+	if globalErr != nil {
+		fmt.Fprintf(b, "Guardian Set (Wormholescan): ❌ unreachable (%s)\n\n", globalErr)
+		return
+	}
+
+	// Fetch Akash on-chain guardian addresses for this network.
+	akashClient := guardian.NewAkashOracleClient(network.AkashAPI, network.Name)
+	akashAddresses, err := akashClient.GetGuardianAddresses(ctx)
+	if err != nil {
+		fmt.Fprintf(b, "Guardian Set: global index %d (%d guardians)  |  Akash: ❌ params unreachable (%s)\n\n",
+			globalIndex, len(globalAddresses), err)
+		return
+	}
+
+	// Check sync: compare address counts and all addresses.
+	inSync := len(globalAddresses) == len(akashAddresses)
+	if inSync {
+		for i, addr := range globalAddresses {
+			if i >= len(akashAddresses) || addr != strings.ToLower(akashAddresses[i]) {
+				inSync = false
+				break
+			}
+		}
+	}
+
+	syncIcon := "✅"
+	syncLabel := "in sync with Akash"
+	if !inSync {
+		syncIcon = "🔴"
+		syncLabel = fmt.Sprintf("OUT OF SYNC — Akash has %d guardians, global has %d",
+			len(akashAddresses), len(globalAddresses))
+	}
+
+	fmt.Fprintf(b, "Guardian Set (Wormholescan): %s index %d  %d guardians  %s\n\n",
+		syncIcon, globalIndex, len(globalAddresses), syncLabel)
 }
 
 func (r *Reporter) fetchOraclePrice(ctx context.Context, akashAPI string) (price string, age time.Duration, err error) {

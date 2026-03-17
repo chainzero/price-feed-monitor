@@ -26,10 +26,7 @@ spec:
 
       containers:
         - name: price-feed-monitor
-          # Update the tag to a specific version for production deployments.
-          # Using 'latest' here for initial rollout; pin to a digest or semver tag
-          # once a CI/CD pipeline is publishing versioned images.
-          image: scarruthers/price-feed-monitor:latest
+          image: scarruthers/price-feed-monitor:v3
           imagePullPolicy: Always
 
           env:
