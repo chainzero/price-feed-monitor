@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: price-feed-monitor
+  namespace: akash-services
+  labels:
+    app: price-feed-monitor
+spec:
+  # Single replica — running multiple instances would cause duplicate Slack alerts
+  # since each instance maintains independent cooldown state in memory.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: price-feed-monitor
+  template:
+    metadata:
+      labels:
+        app: price-feed-monitor
+    spec:
+      # No service account needed — this app makes only outbound HTTP calls.
+      # Schedule on the control-plane node which has internet egress.
+      # The worker node has no external IP and no Cloud NAT configured.
+      nodeSelector:
+        kubernetes.io/hostname: provider-monitor-k3cluster
+      automountServiceAccountToken: false
+
+      containers:
+        - name: price-feed-monitor
+          # Update the tag to a specific version for production deployments.
+          # Using 'latest' here for initial rollout; pin to a digest or semver tag
+          # once a CI/CD pipeline is publishing versioned images.
+          image: scarruthers/price-feed-monitor:latest
+          imagePullPolicy: Always
+
+          env:
+            # Tell the app where to find the config file (mounted from ConfigMap below).
+            - name: PRICE_FEED_MONITOR_CONFIG
+              value: /etc/price-feed-monitor/config.yaml
+
+            # Slack webhook URL — sourced from Secret, overrides the placeholder value
+            # in config.yaml. This is the only credential this app requires.
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: price-feed-monitor-secrets
+                  key: slack-webhook-url
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+
+          securityContext:
+            # Match the distroless nonroot image's built-in user (uid/gid 65532).
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            # The binary only needs to read its config — no writes needed.
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            # NOTE: capabilities.drop ALL is intentionally omitted — on this k3s/Flannel
+            # cluster it breaks UDP return traffic, preventing DNS resolution.
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/price-feed-monitor
+              readOnly: true
+
+      volumes:
+        - name: config
+          configMap:
+            name: price-feed-monitor-config
+
+      # Restart on crash — K8s default for Deployments, stated explicitly for clarity.
+      restartPolicy: Always

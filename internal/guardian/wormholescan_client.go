@@ -55,11 +55,10 @@ func NewWormholescanClient(baseURL string) *WormholescanClient {
 // the 20-byte Ethereum address format used by the Wormhole guardian keys.
 type currentGuardianSetResponse struct {
 	GuardianSet struct {
-		Index     uint32 `json:"index"`
-		Addresses []struct {
-			// Address is a 20-byte hex Ethereum address, e.g. "58cc3ae5c097b213ce3c81979e1b9f9d5929b6ab"
-			Address string `json:"address"`
-		} `json:"addresses"`
+		Index uint32 `json:"index"`
+		// Addresses is a flat list of 20-byte hex Ethereum addresses returned as plain
+		// strings by the Wormholescan API, e.g. "58cc3ae5c097b213ce3c81979e1b9f9d5929b6ab".
+		Addresses []string `json:"addresses"`
 	} `json:"guardianSet"`
 }
 
@@ -132,8 +131,7 @@ func (c *WormholescanClient) GetCurrentGuardianSet(ctx context.Context) (uint32,
 	for i, a := range result.GuardianSet.Addresses {
 		// Normalize: strip optional "0x" prefix and lowercase for consistent comparison
 		// against the addresses returned by GetGuardianAddresses (Akash oracle params).
-		addr := strings.TrimPrefix(strings.ToLower(a.Address), "0x")
-		addresses[i] = addr
+		addresses[i] = strings.TrimPrefix(strings.ToLower(a), "0x")
 	}
 
 	return result.GuardianSet.Index, addresses, nil

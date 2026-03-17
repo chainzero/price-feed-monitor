@@ -1,0 +1,104 @@
+# price-feed-monitor ConfigMap
+#
+# Mounts config.yaml into the pod at /etc/price-feed-monitor/config.yaml.
+# The PRICE_FEED_MONITOR_CONFIG env var in the Deployment points to this path.
+#
+# The slack.webhook_url value here is a placeholder — it is overridden at runtime
+# by the SLACK_WEBHOOK_URL env var sourced from the Secret, so it never needs to
+# contain the real webhook URL in this file.
+#
+# To update config (e.g. add a new network or relayer):
+#   1. Edit the config.yaml data below
+#   2. kubectl apply -f deploy/configmap.yaml
+#   3. kubectl rollout restart deployment/price-feed-monitor -n akash-services
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: price-feed-monitor-config
+  namespace: akash-services
+data:
+  config.yaml: |
+    slack:
+      webhook_url: "placeholder-overridden-by-secret"
+      channel: "#akash-bme-monitor"
+
+    # Component 1: Oracle Price Health
+    oracle_price_monitor:
+      enabled: true
+      poll_interval: 60s
+      thresholds:
+        warning_age: 5m
+        critical_age: 15m
+        emergency_age: 30m
+
+    # Component 2: Hermes Relayer Health
+    hermes_health_monitor:
+      enabled: true
+      poll_interval: 30s
+      consecutive_failures_threshold: 3
+
+    # Component 3: Guardian Set Currency (Ethereum RPC)
+    guardian_set_monitor:
+      enabled: true
+      poll_interval: 10m
+      # For production, replace with a dedicated RPC endpoint:
+      #   ethereum_rpc: "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+      ethereum_rpc: "https://ethereum-rpc.publicnode.com"
+      wormhole_contract: "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"
+
+    # Component 5: Wormholescan Guardian Set Monitor
+    wormholescan_monitor:
+      enabled: true
+      poll_interval: 30m
+      api_base_url: "https://api.wormholescan.io"
+      governance_emitter: "0000000000000000000000000000000000000000000000000000000000000004"
+
+    # Component 6: BME Status Monitor
+    bme_monitor:
+      enabled: true
+      poll_interval: 60s
+
+    # Component 4: Guardian Update Announcements
+    announcement_monitor:
+      enabled: true
+      etherscan:
+        enabled: false
+        api_key: "YOUR_ETHERSCAN_API_KEY"
+        poll_interval: 5m
+      pyth_forum:
+        enabled: true
+        url: "https://forum.pyth.network/c/proposals/7.rss"
+        poll_interval: 30m
+        keywords:
+          - "guardian"
+          - "guardian set"
+          - "wormhole core"
+          - "guardian rotation"
+          - "guardian key"
+      github:
+        enabled: false
+        repo: "wormhole-foundation/wormhole"
+        poll_interval: 1h
+
+    networks:
+      - name: testnet-oracle
+        akash_api: "https://testnetoracleapi.akashnet.net"
+        hermes_relayers:
+          - name: hermes-relayer-01
+            health_endpoint: "https://hermesrelayer1.dev.akash.pub/health"
+            wallet: "akash1adfgt4twjtsfgjattq3gsaa9hrpzg0q4c55jtv"
+            min_wallet_balance: 100000000
+            expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+            expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
+          # - name: hermes-relayer-02
+          #   health_endpoint: "https://hermesrelayer2.dev.akash.pub/health"
+          #   wallet: "akash1..."
+          #   min_wallet_balance: 100000000
+          #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+          #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
+          # - name: hermes-relayer-03
+          #   health_endpoint: "https://hermesrelayer3.dev.akash.pub/health"
+          #   wallet: "akash1..."
+          #   min_wallet_balance: 100000000
+          #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+          #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
