@@ -88,7 +88,9 @@ networks:
       - name: hermes-relayer-01
         health_endpoint: "https://hermesrelayer1.dev.akash.pub/health"
         wallet: "akash1adfgt4twjtsfgjattq3gsaa9hrpzg0q4c55jtv"
-        min_wallet_balance: 100000000  # 100 AKT in uakt
+        info_wallet_balance: 1000000000  # 1000 AKT — Info alert
+        warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
+        min_wallet_balance: 100000000    # 100 AKT  — Critical alert
         expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
         expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
       # - name: hermes-relayer-02

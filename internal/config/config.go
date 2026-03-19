@@ -110,10 +110,16 @@ type NetworkConfig struct {
 }
 
 type RelayerConfig struct {
-	Name             string `yaml:"name"`
-	HealthEndpoint   string `yaml:"health_endpoint"`
-	Wallet           string `yaml:"wallet"`
-	MinWalletBalance int64  `yaml:"min_wallet_balance"`
+	Name           string `yaml:"name"`
+	HealthEndpoint string `yaml:"health_endpoint"`
+	Wallet         string `yaml:"wallet"`
+	// Wallet balance alert thresholds (in uakt). Three severity tiers:
+	//   info_wallet_balance  — Info alert (heads-up, not urgent)
+	//   warn_wallet_balance  — Warning alert (fund soon)
+	//   min_wallet_balance   — Critical alert (fund immediately)
+	InfoWalletBalance int64 `yaml:"info_wallet_balance"`
+	WarnWalletBalance int64 `yaml:"warn_wallet_balance"`
+	MinWalletBalance  int64 `yaml:"min_wallet_balance"`
 	// Optional: if set, the health monitor will alert if the relayer reports
 	// a different value (detects accidental misconfiguration).
 	ExpectedPriceFeedID     string `yaml:"expected_price_feed_id"`

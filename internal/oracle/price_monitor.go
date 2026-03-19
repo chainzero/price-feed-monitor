@@ -210,6 +210,11 @@ func (m *PriceMonitor) fetchLatestPrice(ctx context.Context) (*types.OraclePrice
 }
 
 // checkWalletBalance verifies the Hermes relayer wallet has enough AKT for gas.
+// Three alert tiers (all use the same alert key so severity escalation/de-escalation works):
+//
+//	< min_wallet_balance  (default 100 AKT)  → Critical
+//	< warn_wallet_balance (default 500 AKT)  → Warning
+//	< info_wallet_balance (default 1000 AKT) → Info
 func (m *PriceMonitor) checkWalletBalance(ctx context.Context, relayer config.RelayerConfig) {
 	if relayer.Wallet == "" || relayer.MinWalletBalance == 0 {
 		return
@@ -225,6 +230,8 @@ func (m *PriceMonitor) checkWalletBalance(ctx context.Context, relayer config.Re
 	alertKey := fmt.Sprintf("wallet_balance_low_%s_%s", m.network.Name, relayer.Name)
 	balanceAKT := float64(balanceUAKT) / 1_000_000
 	minAKT := float64(relayer.MinWalletBalance) / 1_000_000
+	warnAKT := float64(relayer.WarnWalletBalance) / 1_000_000
+	infoAKT := float64(relayer.InfoWalletBalance) / 1_000_000
 
 	m.logger.Info("wallet balance check",
 		"relayer", relayer.Name,
@@ -232,29 +239,67 @@ func (m *PriceMonitor) checkWalletBalance(ctx context.Context, relayer config.Re
 		"min_akt", fmt.Sprintf("%.2f", minAKT),
 	)
 
-	if balanceUAKT < relayer.MinWalletBalance {
+	fundCmd := fmt.Sprintf("akash tx bank send default %s 10000000000uakt --from default -y", relayer.Wallet)
+
+	switch {
+	case balanceUAKT < relayer.MinWalletBalance:
 		m.alerter.Send(types.Alert{
 			Key:      alertKey,
-			Severity: types.SeverityWarning,
-			Title:    "HERMES WALLET BALANCE LOW",
+			Severity: types.SeverityCritical,
+			Title:    fmt.Sprintf("HERMES WALLET CRITICAL — %s", relayer.Name),
 			Body: fmt.Sprintf(
 				"Network: %s\nRelayer: %s\nWallet: %s\n\n"+
 					"Current balance: %.2f AKT\n"+
-					"Minimum required: %.2f AKT\n\n"+
-					"Action required: Fund the Hermes wallet to prevent gas failures.\n"+
-					"  akash tx bank send default %s 10000000000uakt --from default -y",
+					"Critical threshold: %.2f AKT  ← BREACHED\n\n"+
+					"Action required immediately: Fund the wallet to prevent gas failures.\n"+
+					"  %s",
 				m.network.Name, relayer.Name, relayer.Wallet,
-				balanceAKT, minAKT,
-				relayer.Wallet,
+				balanceAKT, minAKT, fundCmd,
 			),
 		})
-	} else {
+
+	case relayer.WarnWalletBalance > 0 && balanceUAKT < relayer.WarnWalletBalance:
+		m.alerter.Send(types.Alert{
+			Key:      alertKey,
+			Severity: types.SeverityWarning,
+			Title:    fmt.Sprintf("HERMES WALLET LOW — %s", relayer.Name),
+			Body: fmt.Sprintf(
+				"Network: %s\nRelayer: %s\nWallet: %s\n\n"+
+					"Current balance: %.2f AKT\n"+
+					"Warning threshold: %.2f AKT  ← BREACHED\n"+
+					"Critical threshold: %.2f AKT\n\n"+
+					"Fund the wallet soon to avoid hitting the critical threshold.\n"+
+					"  %s",
+				m.network.Name, relayer.Name, relayer.Wallet,
+				balanceAKT, warnAKT, minAKT, fundCmd,
+			),
+		})
+
+	case relayer.InfoWalletBalance > 0 && balanceUAKT < relayer.InfoWalletBalance:
+		m.alerter.Send(types.Alert{
+			Key:      alertKey,
+			Severity: types.SeverityInfo,
+			Title:    fmt.Sprintf("HERMES WALLET NOTICE — %s", relayer.Name),
+			Body: fmt.Sprintf(
+				"Network: %s\nRelayer: %s\nWallet: %s\n\n"+
+					"Current balance: %.2f AKT\n"+
+					"Info threshold: %.2f AKT  ← BREACHED\n"+
+					"Warning threshold: %.2f AKT\n"+
+					"Critical threshold: %.2f AKT\n\n"+
+					"Balance is declining — consider funding soon.\n"+
+					"  %s",
+				m.network.Name, relayer.Name, relayer.Wallet,
+				balanceAKT, infoAKT, warnAKT, minAKT, fundCmd,
+			),
+		})
+
+	default:
 		m.alerter.Resolve(
 			alertKey,
-			"HERMES WALLET BALANCE HEALTHY",
+			fmt.Sprintf("HERMES WALLET HEALTHY — %s", relayer.Name),
 			fmt.Sprintf(
 				"Network: %s\nRelayer: %s\n\n"+
-					"Balance: %.2f AKT (minimum: %.2f AKT)",
+					"Balance: %.2f AKT (critical threshold: %.2f AKT)",
 				m.network.Name, relayer.Name, balanceAKT, minAKT,
 			),
 		)

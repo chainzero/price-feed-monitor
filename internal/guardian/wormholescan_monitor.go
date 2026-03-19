@@ -36,13 +36,14 @@ import (
 // Grace period: The Akash Wormhole contract's guardian_set_expiry is 86400 seconds
 // (24 hours). Polling every 15–60 minutes ensures detection well within this window.
 type WormholescanMonitor struct {
-	cfg            config.WormholescanConfig
-	networks       []config.NetworkConfig
-	wormholescan   *WormholescanClient
-	alerter        *alerting.Slack
-	logger         *slog.Logger
-	lastKnownIndex uint32
-	initialized    bool
+	cfg                 config.WormholescanConfig
+	networks            []config.NetworkConfig
+	wormholescan        *WormholescanClient
+	alerter             *alerting.Slack
+	logger              *slog.Logger
+	lastKnownIndex      uint32
+	initialized         bool
+	consecutiveFailures int
 }
 
 func NewWormholescanMonitor(
@@ -91,31 +92,55 @@ func (m *WormholescanMonitor) check(ctx context.Context) {
 	// against what Akash currently has configured).
 	globalIndex, globalAddresses, err := m.wormholescan.GetCurrentGuardianSet(ctx)
 	if err != nil {
+		m.consecutiveFailures++
 		m.logger.Error("failed to fetch current guardian set from Wormholescan",
+			"consecutive_failures", m.consecutiveFailures,
 			"error", err,
 		)
+
+		var sev types.Severity
+		var title string
+		switch m.consecutiveFailures {
+		case 1:
+			sev = types.SeverityWarning
+			title = "WORMHOLESCAN API UNREACHABLE — WARNING"
+		case 2:
+			sev = types.SeverityCritical
+			title = "WORMHOLESCAN API UNREACHABLE — CRITICAL"
+		case 3:
+			sev = types.SeverityEmergency
+			title = "WORMHOLESCAN API UNREACHABLE — EMERGENCY (final alert)"
+		default:
+			return
+		}
+
 		m.alerter.Send(types.Alert{
 			Key:      "wormholescan_unreachable",
-			Severity: types.SeverityWarning,
-			Title:    "WORMHOLESCAN API UNREACHABLE",
+			Severity: sev,
+			Title:    title,
 			Body: fmt.Sprintf(
 				"Cannot reach Wormholescan to verify guardian set index.\n"+
 					"API: %s\n"+
+					"Consecutive failures: %d\n"+
 					"Error: %s\n\n"+
 					"Risk: A guardian rotation may go undetected while this endpoint is down.\n"+
-					"Component 3 (Ethereum RPC) continues to provide address-level monitoring.",
-				m.cfg.APIBaseURL, err.Error(),
+					"Component 3 (Ethereum RPC) continues to provide address-level monitoring.\n"+
+					"No further alerts will be sent until the endpoint recovers.",
+				m.cfg.APIBaseURL, m.consecutiveFailures, err.Error(),
 			),
 		})
 		return
 	}
 
-	// API is responding — clear any outstanding unreachable alert.
-	m.alerter.Resolve(
-		"wormholescan_unreachable",
-		"WORMHOLESCAN API REACHABLE",
-		fmt.Sprintf("API endpoint is responding again.\nAPI: %s", m.cfg.APIBaseURL),
-	)
+	// API is responding — reset failure count and clear any outstanding alert.
+	if m.consecutiveFailures > 0 {
+		m.consecutiveFailures = 0
+		m.alerter.Resolve(
+			"wormholescan_unreachable",
+			"WORMHOLESCAN API REACHABLE",
+			fmt.Sprintf("API endpoint is responding again.\nAPI: %s", m.cfg.APIBaseURL),
+		)
+	}
 
 	m.logger.Info("wormholescan guardian set fetched",
 		"global_index", globalIndex,

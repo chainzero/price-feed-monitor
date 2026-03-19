@@ -35,11 +35,12 @@ import (
 // All four conditions are tracked independently with their own alert keys so
 // that each can resolve separately as the system recovers.
 type StatusMonitor struct {
-	network config.NetworkConfig
-	cfg     config.BMEConfig
-	alerter *alerting.Slack
-	logger  *slog.Logger
-	client  *http.Client
+	network             config.NetworkConfig
+	cfg                 config.BMEConfig
+	alerter             *alerting.Slack
+	logger              *slog.Logger
+	client              *http.Client
+	consecutiveFailures int
 }
 
 func NewStatusMonitor(
@@ -103,18 +104,42 @@ func (m *StatusMonitor) check(ctx context.Context) {
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		m.logger.Error("BME status endpoint unreachable", "url", url, "error", err)
+		m.consecutiveFailures++
+		m.logger.Error("BME status endpoint unreachable",
+			"url", url,
+			"consecutive_failures", m.consecutiveFailures,
+			"error", err,
+		)
+
+		var sev types.Severity
+		var title string
+		switch m.consecutiveFailures {
+		case 1:
+			sev = types.SeverityWarning
+			title = fmt.Sprintf("BME STATUS UNREACHABLE — WARNING — %s", m.network.Name)
+		case 2:
+			sev = types.SeverityCritical
+			title = fmt.Sprintf("BME STATUS UNREACHABLE — CRITICAL — %s", m.network.Name)
+		case 3:
+			sev = types.SeverityEmergency
+			title = fmt.Sprintf("BME STATUS UNREACHABLE — EMERGENCY — %s (final alert)", m.network.Name)
+		default:
+			return
+		}
+
 		m.alerter.Send(types.Alert{
 			Key:      fmt.Sprintf("bme_unreachable_%s", m.network.Name),
-			Severity: types.SeverityWarning,
-			Title:    fmt.Sprintf("BME STATUS UNREACHABLE — %s", m.network.Name),
+			Severity: sev,
+			Title:    title,
 			Body: fmt.Sprintf(
 				"Network: %s\n"+
 					"Cannot reach BME status endpoint.\n"+
 					"URL: %s\n"+
+					"Consecutive failures: %d\n"+
 					"Error: %s\n\n"+
-					"BME health cannot be verified while this endpoint is down.",
-				m.network.Name, url, err.Error(),
+					"BME health cannot be verified while this endpoint is down.\n"+
+					"No further alerts will be sent until the endpoint recovers.",
+				m.network.Name, url, m.consecutiveFailures, err.Error(),
 			),
 		})
 		return
@@ -132,12 +157,15 @@ func (m *StatusMonitor) check(ctx context.Context) {
 		return
 	}
 
-	// Endpoint is responding — clear any outstanding unreachable alert.
-	m.alerter.Resolve(
-		fmt.Sprintf("bme_unreachable_%s", m.network.Name),
-		fmt.Sprintf("BME STATUS REACHABLE — %s", m.network.Name),
-		fmt.Sprintf("Network: %s\nBME status endpoint is responding again.", m.network.Name),
-	)
+	// Endpoint is responding — reset failure count and clear any outstanding alert.
+	if m.consecutiveFailures > 0 {
+		m.consecutiveFailures = 0
+		m.alerter.Resolve(
+			fmt.Sprintf("bme_unreachable_%s", m.network.Name),
+			fmt.Sprintf("BME STATUS REACHABLE — %s", m.network.Name),
+			fmt.Sprintf("Network: %s\nBME status endpoint is responding again.", m.network.Name),
+		)
+	}
 
 	// --- Parse numeric fields ---
 	// Thresholds are read from the chain response so the monitor automatically

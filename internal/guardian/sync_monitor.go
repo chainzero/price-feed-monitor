@@ -92,17 +92,35 @@ func (m *SyncMonitor) check(ctx context.Context) {
 			"consecutive_failures", m.ethFailures,
 			"error", err,
 		)
+
+		var sev types.Severity
+		var title string
+		switch m.ethFailures {
+		case 1:
+			sev = types.SeverityWarning
+			title = "ETHEREUM RPC UNREACHABLE — WARNING"
+		case 2:
+			sev = types.SeverityCritical
+			title = "ETHEREUM RPC UNREACHABLE — CRITICAL"
+		case 3:
+			sev = types.SeverityEmergency
+			title = "ETHEREUM RPC UNREACHABLE — EMERGENCY (final alert)"
+		default:
+			return
+		}
+
 		m.alerter.Send(types.Alert{
 			Key:      "ethereum_rpc_unreachable",
-			Severity: types.SeverityCritical,
-			Title:    "ETHEREUM RPC UNREACHABLE",
+			Severity: sev,
+			Title:    title,
 			Body: fmt.Sprintf(
 				"Cannot reach Ethereum RPC to verify guardian set currency.\n"+
 					"RPC: %s\n"+
 					"Consecutive failures: %d\n"+
 					"Error: %s\n\n"+
 					"Risk: A guardian rotation may go undetected while this endpoint is down.\n"+
-					"Action required: Check RPC endpoint configuration.",
+					"Action required: Check RPC endpoint configuration.\n"+
+					"No further alerts will be sent until the endpoint recovers.",
 				m.cfg.EthereumRPC, m.ethFailures, err.Error(),
 			),
 		})
@@ -184,17 +202,38 @@ func (m *SyncMonitor) compareWithNetwork(
 			"consecutive_failures", state.consecutiveFailures,
 			"error", err,
 		)
+
+		// Alert only on the first 3 consecutive failures with escalating severity.
+		// After that, stay silent until the endpoint recovers — no channel flooding.
+		var sev types.Severity
+		var title string
+		switch state.consecutiveFailures {
+		case 1:
+			sev = types.SeverityWarning
+			title = "AKASH ORACLE PARAMS UNREACHABLE — WARNING"
+		case 2:
+			sev = types.SeverityCritical
+			title = "AKASH ORACLE PARAMS UNREACHABLE — CRITICAL"
+		case 3:
+			sev = types.SeverityEmergency
+			title = "AKASH ORACLE PARAMS UNREACHABLE — EMERGENCY (final alert)"
+		default:
+			// Silent beyond 3 failures — already alerted, waiting for recovery.
+			return
+		}
+
 		m.alerter.Send(types.Alert{
 			Key:      akashRPCKey,
-			Severity: types.SeverityWarning,
-			Title:    "AKASH ORACLE PARAMS UNREACHABLE",
+			Severity: sev,
+			Title:    title,
 			Body: fmt.Sprintf(
 				"Network: %s\n"+
 					"Cannot fetch oracle params to verify guardian set sync.\n"+
 					"API: %s\n"+
 					"Consecutive failures: %d\n"+
 					"Error: %s\n\n"+
-					"Guardian set sync cannot be verified while this endpoint is down.",
+					"Guardian set sync cannot be verified while this endpoint is down.\n"+
+					"No further alerts will be sent until the endpoint recovers.",
 				network.Name, network.AkashAPI, state.consecutiveFailures, err.Error(),
 			),
 		})

@@ -155,8 +155,13 @@ func (r *Reporter) appendRelayerStatus(
 			balanceAKT := float64(balanceUAKT) / 1_000_000
 			minAKT := float64(relayer.MinWalletBalance) / 1_000_000
 			balanceIcon := "✅"
-			if relayer.MinWalletBalance > 0 && balanceUAKT < relayer.MinWalletBalance {
+			switch {
+			case relayer.MinWalletBalance > 0 && balanceUAKT < relayer.MinWalletBalance:
+				balanceIcon = "🔴"
+			case relayer.WarnWalletBalance > 0 && balanceUAKT < relayer.WarnWalletBalance:
 				balanceIcon = "⚠️"
+			case relayer.InfoWalletBalance > 0 && balanceUAKT < relayer.InfoWalletBalance:
+				balanceIcon = "ℹ️"
 			}
 			fmt.Fprintf(b, "    Wallet:    %s %.2f AKT (min: %.2f AKT)\n",
 				balanceIcon, balanceAKT, minAKT)
