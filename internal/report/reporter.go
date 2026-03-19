@@ -95,7 +95,7 @@ func (r *Reporter) post(ctx context.Context, header string) {
 			} else if priceAge >= 5*time.Minute {
 				priceStatus = "⚠️"
 			}
-			fmt.Fprintf(&b, "Oracle Price: %s $%s AKT/USD  (age: %s)\n\n",
+			fmt.Fprintf(&b, "Oracle Price: %s $%.4f AKT/USD  (age: %s)\n\n",
 				priceStatus, price, formatAge(priceAge))
 		}
 
@@ -118,7 +118,7 @@ func (r *Reporter) post(ctx context.Context, header string) {
 
 	// Pyth forum monitoring note
 	if r.cfg.AnnouncementMonitor.Enabled && r.cfg.AnnouncementMonitor.PythForum.Enabled {
-		fmt.Fprintf(&b, "\nPyth Forum: ✅ monitoring active (%s)\n", r.cfg.AnnouncementMonitor.PythForum.URL)
+		fmt.Fprintf(&b, "\nPyth Forum: ✅ monitoring active\n")
 	}
 
 	r.alerter.Post(header, b.String())
@@ -137,23 +137,19 @@ func (r *Reporter) appendRelayerStatus(
 	}
 
 	runningIcon := "✅"
+	runningLabel := "running"
 	if !health.IsRunning {
 		runningIcon = "🔴"
+		runningLabel = "stopped"
 	}
 
-	fmt.Fprintf(b, "  • %s: %s isRunning=%v\n", relayer.Name, runningIcon, health.IsRunning)
-	fmt.Fprintf(b, "    Address:  %s\n", health.Address)
-	fmt.Fprintf(b, "    PriceFeed: %s\n", health.PriceFeedID)
-	fmt.Fprintf(b, "    Contract:  %s\n", health.ContractAddress)
-
-	// Wallet balance
+	walletStr := ""
 	if relayer.Wallet != "" {
 		balanceUAKT, err := r.fetchWalletBalance(ctx, network.AkashAPI, relayer.Wallet)
 		if err != nil {
-			fmt.Fprintf(b, "    Wallet:    ❌ balance unavailable (%s)\n", err)
+			walletStr = "wallet: ❌ unavailable"
 		} else {
 			balanceAKT := float64(balanceUAKT) / 1_000_000
-			minAKT := float64(relayer.MinWalletBalance) / 1_000_000
 			balanceIcon := "✅"
 			switch {
 			case relayer.MinWalletBalance > 0 && balanceUAKT < relayer.MinWalletBalance:
@@ -163,10 +159,15 @@ func (r *Reporter) appendRelayerStatus(
 			case relayer.InfoWalletBalance > 0 && balanceUAKT < relayer.InfoWalletBalance:
 				balanceIcon = "ℹ️"
 			}
-			fmt.Fprintf(b, "    Wallet:    %s %.2f AKT (min: %.2f AKT)\n",
-				balanceIcon, balanceAKT, minAKT)
+			walletStr = fmt.Sprintf("wallet: %s %.0f AKT", balanceIcon, balanceAKT)
 		}
 	}
+
+	fmt.Fprintf(b, "  • %s: %s %s  |  %s\n", relayer.Name, runningIcon, runningLabel, walletStr)
+	fmt.Fprintf(b, "    addr: %s  |  feed: %s\n",
+		truncate(health.Address, 16, 6),
+		truncate(health.PriceFeedID, 10, 5),
+	)
 }
 
 // reporterBMEStatus is a local mirror of the BME API response fields we need.
@@ -232,9 +233,8 @@ func (r *Reporter) appendBMEStatus(ctx context.Context, b *strings.Builder, akas
 		refundsIcon = "🔴"
 	}
 
-	fmt.Fprintf(b, "BME Status: %s %s  collateral ratio: %.1fx  (warn: %.2f  halt: %.2f)\n",
-		bmeIcon, s.Status, ratio, warnThreshold, haltThreshold)
-	fmt.Fprintf(b, "  Mints: %s  Refunds: %s\n\n", mintsIcon, refundsIcon)
+	fmt.Fprintf(b, "BME: %s %s  |  collateral: %.0fx  |  mints: %s  refunds: %s  (warn: %.2f  halt: %.2f)\n\n",
+		bmeIcon, formatBMEStatus(s.Status), ratio, mintsIcon, refundsIcon, warnThreshold, haltThreshold)
 }
 
 func (r *Reporter) appendGuardianStatus(
@@ -246,7 +246,7 @@ func (r *Reporter) appendGuardianStatus(
 	globalErr error,
 ) {
 	if globalErr != nil {
-		fmt.Fprintf(b, "Guardian Set (Wormholescan): ❌ unreachable (%s)\n\n", globalErr)
+		fmt.Fprintf(b, "Guardian Set: ❌ unreachable (%s)\n\n", globalErr)
 		return
 	}
 
@@ -278,42 +278,47 @@ func (r *Reporter) appendGuardianStatus(
 			len(akashAddresses), len(globalAddresses))
 	}
 
-	fmt.Fprintf(b, "Guardian Set (Wormholescan): %s index %d  %d guardians  %s\n\n",
+	fmt.Fprintf(b, "Guardian Set: %s index %d  |  %d guardians  |  %s\n\n",
 		syncIcon, globalIndex, len(globalAddresses), syncLabel)
 }
 
-func (r *Reporter) fetchOraclePrice(ctx context.Context, akashAPI string) (price string, age time.Duration, err error) {
+func (r *Reporter) fetchOraclePrice(ctx context.Context, akashAPI string) (price float64, age time.Duration, err error) {
 	url := fmt.Sprintf("%s/akash/oracle/v1/prices?pagination.limit=1", akashAPI)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", 0, err
+		return 0, 0, err
 	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return "", 0, err
+		return 0, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("status %d", resp.StatusCode)
+		return 0, 0, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
 	var result types.OraclePriceResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", 0, err
+		return 0, 0, err
 	}
 	if len(result.Prices) == 0 {
-		return "", 0, fmt.Errorf("no prices returned")
+		return 0, 0, fmt.Errorf("no prices returned")
 	}
 
 	p := result.Prices[0]
 	ts, err := time.Parse(time.RFC3339, p.State.Timestamp)
 	if err != nil {
-		return "", 0, fmt.Errorf("parse timestamp: %w", err)
+		return 0, 0, fmt.Errorf("parse timestamp: %w", err)
 	}
 
-	return p.State.Price, time.Since(ts.UTC()), nil
+	priceF, err := strconv.ParseFloat(p.State.Price, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse price: %w", err)
+	}
+
+	return priceF, time.Since(ts.UTC()), nil
 }
 
 func (r *Reporter) fetchHealth(ctx context.Context, endpoint string) (*types.HermesHealthResponse, error) {
@@ -378,6 +383,24 @@ func durationUntilNext(hour int, loc *time.Location) time.Duration {
 		next = next.Add(24 * time.Hour)
 	}
 	return time.Until(next)
+}
+
+// truncate shortens a string to prefix+...+suffix chars for display.
+func truncate(s string, prefix, suffix int) string {
+	if len(s) <= prefix+suffix+3 {
+		return s
+	}
+	return s[:prefix] + "..." + s[len(s)-suffix:]
+}
+
+// formatBMEStatus converts internal status strings like "mint_status_healthy"
+// to human-readable labels like "Healthy".
+func formatBMEStatus(s string) string {
+	s = strings.TrimPrefix(s, "mint_status_")
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func formatAge(d time.Duration) string {
