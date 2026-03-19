@@ -104,9 +104,10 @@ type GitHubConfig struct {
 }
 
 type NetworkConfig struct {
-	Name           string          `yaml:"name"`
-	AkashAPI       string          `yaml:"akash_api"`
-	HermesRelayers []RelayerConfig `yaml:"hermes_relayers"`
+	Name             string          `yaml:"name"`
+	AkashAPI         string          `yaml:"akash_api"`
+	WormholeContract string          `yaml:"wormhole_contract"`
+	HermesRelayers   []RelayerConfig `yaml:"hermes_relayers"`
 }
 
 type RelayerConfig struct {

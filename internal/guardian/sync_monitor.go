@@ -193,7 +193,7 @@ func (m *SyncMonitor) compareWithNetwork(
 	syncAlertKey := fmt.Sprintf("guardian_sync_%s", network.Name)
 	akashRPCKey := fmt.Sprintf("akash_params_unreachable_%s", network.Name)
 
-	akashClient := NewAkashOracleClient(network.AkashAPI, network.Name)
+	akashClient := NewAkashOracleClient(network.AkashAPI, network.Name, network.WormholeContract)
 	akashAddresses, err := akashClient.GetGuardianAddresses(ctx)
 	if err != nil {
 		state.consecutiveFailures++

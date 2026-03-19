@@ -84,6 +84,7 @@ announcement_monitor:
 networks:
   - name: testnet-oracle
     akash_api: "https://testnetoracleapi.akashnet.net"
+    wormhole_contract: "akash14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9sggdamt"
     hermes_relayers:
       - name: hermes-relayer-01
         health_endpoint: "https://hermesrelayer1.dev.akash.pub/health"

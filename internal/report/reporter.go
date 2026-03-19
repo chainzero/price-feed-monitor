@@ -251,7 +251,7 @@ func (r *Reporter) appendGuardianStatus(
 	}
 
 	// Fetch Akash on-chain guardian addresses for this network.
-	akashClient := guardian.NewAkashOracleClient(network.AkashAPI, network.Name)
+	akashClient := guardian.NewAkashOracleClient(network.AkashAPI, network.Name, network.WormholeContract)
 	akashAddresses, err := akashClient.GetGuardianAddresses(ctx)
 	if err != nil {
 		fmt.Fprintf(b, "Guardian Set: global index %d (%d guardians)  |  Akash: ❌ params unreachable (%s)\n\n",

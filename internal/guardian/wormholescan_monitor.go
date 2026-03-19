@@ -257,7 +257,7 @@ func (m *WormholescanMonitor) compareWithNetwork(
 ) {
 	alertKey := fmt.Sprintf("wormholescan_sync_%s", network.Name)
 
-	akashClient := NewAkashOracleClient(network.AkashAPI, network.Name)
+	akashClient := NewAkashOracleClient(network.AkashAPI, network.Name, network.WormholeContract)
 	akashAddresses, err := akashClient.GetGuardianAddresses(ctx)
 	if err != nil {
 		// Akash oracle params unreachable — Component 3 also handles this alert,
