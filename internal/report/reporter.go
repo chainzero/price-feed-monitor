@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akash-network/price-feed-monitor/internal/alerting"
@@ -15,10 +16,6 @@ import (
 	"github.com/akash-network/price-feed-monitor/internal/guardian"
 	"github.com/akash-network/price-feed-monitor/internal/types"
 )
-
-// dailyCheckHour is the hour (24h, America/Chicago) at which the daily
-// health check is posted to Slack.
-const dailyCheckHour = 8
 
 // Reporter posts startup and scheduled health summaries to Slack.
 // It makes its own HTTP calls so it can report status independently
@@ -45,26 +42,47 @@ func (r *Reporter) PostStartup(ctx context.Context) {
 	r.post(ctx, "🔄 BME Price Feed Monitor Restarted")
 }
 
-// RunDailySchedule blocks until ctx is cancelled, posting a health summary
-// at 08:00 America/Chicago each day.
+// RunDailySchedule blocks until ctx is cancelled, posting health summaries
+// at each time configured in report.schedule_times (default: ["08:00"]).
 func (r *Reporter) RunDailySchedule(ctx context.Context) {
-	loc, err := time.LoadLocation("America/Chicago")
+	tz := r.cfg.Report.Timezone
+	if tz == "" {
+		tz = "America/Chicago"
+	}
+	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		r.logger.Error("failed to load America/Chicago timezone", "error", err)
+		r.logger.Error("failed to load timezone", "timezone", tz, "error", err)
 		return
 	}
 
-	for {
-		delay := durationUntilNext(dailyCheckHour, loc)
-		r.logger.Info("daily health check scheduled", "in", delay.Round(time.Minute))
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-			r.post(ctx, "📊 BME Price Feed Monitor — Daily Health Check")
-		}
+	times := r.cfg.Report.ScheduleTimes
+	if len(times) == 0 {
+		times = []string{"08:00"}
 	}
+
+	var wg sync.WaitGroup
+	for _, t := range times {
+		hour, minute, err := parseHHMM(t)
+		if err != nil {
+			r.logger.Error("invalid schedule time, skipping", "time", t, "error", err)
+			continue
+		}
+		wg.Add(1)
+		go func(label string, h, m int) {
+			defer wg.Done()
+			for {
+				delay := durationUntilNext(h, m, loc)
+				r.logger.Info("daily health check scheduled", "time", label, "in", delay.Round(time.Minute))
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(delay):
+					r.post(ctx, "📊 BME Price Feed Monitor — Daily Health Check")
+				}
+			}
+		}(t, hour, minute)
+	}
+	wg.Wait()
 }
 
 // post fetches live status and sends the formatted summary to Slack.
@@ -374,15 +392,27 @@ func (r *Reporter) fetchWalletBalance(ctx context.Context, akashAPI, address str
 	return 0, nil
 }
 
-// durationUntilNext returns the duration until the next occurrence of hour:00
+// durationUntilNext returns the duration until the next occurrence of hour:minute
 // in the given location.
-func durationUntilNext(hour int, loc *time.Location) time.Duration {
+func durationUntilNext(hour, minute int, loc *time.Location) time.Duration {
 	now := time.Now().In(loc)
-	next := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, loc)
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
 	if !now.Before(next) {
 		next = next.Add(24 * time.Hour)
 	}
 	return time.Until(next)
+}
+
+// parseHHMM parses a "HH:MM" string into hour and minute integers.
+func parseHHMM(s string) (hour, minute int, err error) {
+	var h, m int
+	if _, err = fmt.Sscanf(s, "%d:%d", &h, &m); err != nil {
+		return 0, 0, fmt.Errorf("expected HH:MM, got %q", s)
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, 0, fmt.Errorf("time %q out of range", s)
+	}
+	return h, m, nil
 }
 
 // truncate shortens a string to prefix+...+suffix chars for display.

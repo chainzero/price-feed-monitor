@@ -2,6 +2,12 @@ slack:
   webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
   channel: "#akash-bme-monitor"
 
+report:
+  timezone: "America/Chicago"
+  schedule_times:
+    - "08:00"   # Morning health check
+    - "20:00"   # Evening health check
+
 # Component 1: Oracle Price Health
 oracle_price_monitor:
   enabled: true
@@ -87,22 +93,26 @@ networks:
     wormhole_contract: "akash14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9sggdamt"
     hermes_relayers:
       - name: hermes-relayer-01
-        health_endpoint: "https://hermesrelayer1.dev.akash.pub/health"
-        wallet: "akash1adfgt4twjtsfgjattq3gsaa9hrpzg0q4c55jtv"
+        health_endpoint: "https://hermesrelayerprod1.akash.pub/health"
+        wallet: "akash1plnnughn6kvmtz6actn7uhhuz45v09x2fs66x5"
         info_wallet_balance: 1000000000  # 1000 AKT — Info alert
         warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
         min_wallet_balance: 100000000    # 100 AKT  — Critical alert
         expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
         expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
       # - name: hermes-relayer-02
-      #   health_endpoint: "https://hermesrelayer2.dev.akash.pub/health"
-      #   wallet: "akash1..."
-      #   min_wallet_balance: 100000000
+      #   health_endpoint: "https://hermesrelayerprod2.akash.pub/health"
+      #   wallet: "akash17ez5cs6mpa3fdn3g52grgjl6ghetsrrr5g2jpy"
+      #   info_wallet_balance: 1000000000  # 1000 AKT — Info alert
+      #   warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
+      #   min_wallet_balance: 100000000    # 100 AKT  — Critical alert
       #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
       #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
       # - name: hermes-relayer-03
-      #   health_endpoint: "https://hermesrelayer3.dev.akash.pub/health"
-      #   wallet: "akash1..."
-      #   min_wallet_balance: 100000000
+      #   health_endpoint: "https://hermesrelayerprod3.akash.pub/health"
+      #   wallet: "akash1dv7vtjmydlzn3mrccz0qh2wgdrgpx7frmg3xda"
+      #   info_wallet_balance: 1000000000  # 1000 AKT — Info alert
+      #   warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
+      #   min_wallet_balance: 100000000    # 100 AKT  — Critical alert
       #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
       #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"

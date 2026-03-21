@@ -11,6 +11,7 @@ import (
 // Config is the top-level configuration structure loaded from config.yaml.
 type Config struct {
 	Slack                SlackConfig           `yaml:"slack"`
+	Report               ReportConfig          `yaml:"report"`
 	OraclePriceMonitor   OraclePriceConfig     `yaml:"oracle_price_monitor"`
 	HermesHealthMonitor  HermesHealthConfig    `yaml:"hermes_health_monitor"`
 	GuardianSetMonitor   GuardianSetConfig     `yaml:"guardian_set_monitor"`
@@ -18,6 +19,15 @@ type Config struct {
 	BMEMonitor           BMEConfig             `yaml:"bme_monitor"`
 	AnnouncementMonitor  AnnouncementConfig    `yaml:"announcement_monitor"`
 	Networks             []NetworkConfig       `yaml:"networks"`
+}
+
+// ReportConfig controls the startup and scheduled health summary messages.
+type ReportConfig struct {
+	// Timezone is the IANA timezone for schedule_times. Defaults to America/Chicago.
+	Timezone string `yaml:"timezone"`
+	// ScheduleTimes is a list of "HH:MM" times (24h) at which the daily health
+	// check is posted. Defaults to ["08:00"] if omitted.
+	ScheduleTimes []string `yaml:"schedule_times"`
 }
 
 type SlackConfig struct {
