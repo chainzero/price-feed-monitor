@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/akash-network/price-feed-monitor/internal/alerting"
@@ -35,12 +36,13 @@ import (
 // All four conditions are tracked independently with their own alert keys so
 // that each can resolve separately as the system recovers.
 type StatusMonitor struct {
-	network             config.NetworkConfig
-	cfg                 config.BMEConfig
-	alerter             *alerting.Slack
-	logger              *slog.Logger
-	client              *http.Client
-	consecutiveFailures int
+	network                config.NetworkConfig
+	cfg                    config.BMEConfig
+	alerter                *alerting.Slack
+	logger                 *slog.Logger
+	client                 *http.Client
+	consecutiveFailures    int // API unreachable
+	consecutiveHaltedPolls int // mints or refunds halted
 }
 
 func NewStatusMonitor(
@@ -259,68 +261,126 @@ func (m *StatusMonitor) check(ctx context.Context) {
 		)
 	}
 
-	// --- Check 2: Minting halted ---
-	mintsKey := fmt.Sprintf("bme_mints_halted_%s", m.network.Name)
-	if !s.MintsAllowed {
+	// --- Check 2: Minting or refunds halted (combined) ---
+	//
+	// Both flags are checked together and reported in a single alert because they
+	// almost always flip together (e.g. mint_status_halt_oracle sets both false
+	// simultaneously). Separate alerts for each flag would cause duplicate pages.
+	//
+	// Escalation mirrors the bme_unreachable pattern:
+	//   1st consecutive poll halted → Warning
+	//   2nd consecutive poll halted → Critical
+	//   3rd+ consecutive poll halted → Emergency (final — suppressed until resolved)
+	haltKey := fmt.Sprintf("bme_halted_%s", m.network.Name)
+	if !s.MintsAllowed || !s.RefundsAllowed {
+		m.consecutiveHaltedPolls++
+		m.logger.Warn("BME halted",
+			"mints_allowed", s.MintsAllowed,
+			"refunds_allowed", s.RefundsAllowed,
+			"status", s.Status,
+			"consecutive_halted_polls", m.consecutiveHaltedPolls,
+		)
+
+		// After 3 consecutive halted polls the Emergency has been sent — suppress
+		// further alerts until the condition resolves to avoid notification spam.
+		if m.consecutiveHaltedPolls > 3 {
+			return
+		}
+
+		var sev types.Severity
+		var title string
+		switch m.consecutiveHaltedPolls {
+		case 1:
+			sev = types.SeverityWarning
+			title = fmt.Sprintf("BME HALTED — WARNING — %s", m.network.Name)
+		case 2:
+			sev = types.SeverityCritical
+			title = fmt.Sprintf("BME HALTED — CRITICAL — %s", m.network.Name)
+		default:
+			sev = types.SeverityEmergency
+			title = fmt.Sprintf("BME HALTED — EMERGENCY — %s (final alert)", m.network.Name)
+		}
+
+		// Describe which operations are halted.
+		var halted []string
+		if !s.MintsAllowed {
+			halted = append(halted, "mints_allowed = FALSE  (new minting halted)")
+		}
+		if !s.RefundsAllowed {
+			halted = append(halted, "refunds_allowed = FALSE  (collateral refunds halted)")
+		}
+
 		m.alerter.Send(types.Alert{
-			Key:      mintsKey,
-			Severity: types.SeverityCritical,
-			Title:    fmt.Sprintf("BME MINTING HALTED — %s", m.network.Name),
+			Key:      haltKey,
+			Severity: sev,
+			Title:    title,
 			Body: fmt.Sprintf(
 				"Network: %s\n"+
-					"BME Status: %s\n\n"+
-					"mints_allowed is FALSE — the BME module has halted new minting.\n\n"+
+					"BME Status: %s\n"+
+					"Halt Reason: %s\n\n"+
+					"Halted:\n  • %s\n\n"+
 					"Collateral Ratio: %.6f\n"+
+					"Warn Threshold:   %.6f\n"+
 					"Halt Threshold:   %.6f\n\n"+
-					"The AKT burn/mint mechanism is non-functional until the collateral\n"+
-					"ratio recovers above the halt threshold. This directly impacts\n"+
-					"BME provider revenue and lease pricing.",
-				m.network.Name, s.Status,
-				ratio, haltThreshold,
+					"Consecutive halted polls: %d\n\n"+
+					"%s",
+				m.network.Name, s.Status, formatHaltReason(s.Status),
+				strings.Join(halted, "\n  • "),
+				ratio, warnThreshold, haltThreshold,
+				m.consecutiveHaltedPolls,
+				haltGuidance(s.Status),
 			),
 		})
-	} else {
+		return
+	}
+
+	// Both flags are true — BME operational.
+	if m.consecutiveHaltedPolls > 0 {
+		m.consecutiveHaltedPolls = 0
 		m.alerter.Resolve(
-			mintsKey,
-			fmt.Sprintf("BME MINTING RESUMED — %s", m.network.Name),
+			haltKey,
+			fmt.Sprintf("BME OPERATIONAL — %s", m.network.Name),
 			fmt.Sprintf(
 				"Network: %s\n"+
-					"mints_allowed is TRUE — minting has resumed.\n"+
-					"Collateral Ratio: %.6f",
-				m.network.Name, ratio,
+					"mints_allowed and refunds_allowed are both TRUE — BME is operational.\n"+
+					"Collateral Ratio: %.6f\n"+
+					"BME Status: %s",
+				m.network.Name, ratio, s.Status,
 			),
 		)
 	}
+}
 
-	// --- Check 3: Refunds halted ---
-	refundsKey := fmt.Sprintf("bme_refunds_halted_%s", m.network.Name)
-	if !s.RefundsAllowed {
-		m.alerter.Send(types.Alert{
-			Key:      refundsKey,
-			Severity: types.SeverityCritical,
-			Title:    fmt.Sprintf("BME REFUNDS HALTED — %s", m.network.Name),
-			Body: fmt.Sprintf(
-				"Network: %s\n"+
-					"BME Status: %s\n\n"+
-					"refunds_allowed is FALSE — the BME module has halted refunds.\n\n"+
-					"Collateral Ratio: %.6f\n"+
-					"Warn Threshold:   %.6f\n\n"+
-					"Tenants closing deployments will not receive collateral refunds\n"+
-					"until this condition clears.",
-				m.network.Name, s.Status,
-				ratio, warnThreshold,
-			),
-		})
-	} else {
-		m.alerter.Resolve(
-			refundsKey,
-			fmt.Sprintf("BME REFUNDS RESUMED — %s", m.network.Name),
-			fmt.Sprintf(
-				"Network: %s\n"+
-					"refunds_allowed is TRUE — refunds have resumed.\n"+
-					"Collateral Ratio: %.6f",
-				m.network.Name, ratio,
-			),
-		)
+// formatHaltReason converts a BME status string to a human-readable halt reason.
+// The status field encodes why the chain halted operations, not just that it did.
+func formatHaltReason(status string) string {
+	switch status {
+	case "mint_status_halt_oracle":
+		return "Oracle price staleness — oracle data was unavailable at this block"
+	case "mint_status_halt_collateral":
+		return "Collateral ratio breach — ratio fell below the halt threshold"
+	case "mint_status_warn":
+		return "Collateral ratio warning — ratio is below the warn threshold"
+	case "mint_status_healthy":
+		return "Healthy"
+	default:
+		return status
+	}
+}
+
+// haltGuidance returns context-appropriate guidance based on halt reason.
+func haltGuidance(status string) string {
+	switch status {
+	case "mint_status_halt_oracle":
+		return "This is typically transient — the oracle price was stale for one or more\n" +
+			"blocks. If this alert persists across multiple polls, investigate the\n" +
+			"oracle price feed and hermes relayer health."
+	case "mint_status_halt_collateral":
+		return "The collateral ratio has fallen below the halt threshold. The AKT\n" +
+			"burn/mint mechanism is non-functional until the ratio recovers.\n" +
+			"This directly impacts BME provider revenue and lease pricing.\n" +
+			"Immediate investigation required."
+	default:
+		return "Investigate the BME module status on the chain."
 	}
 }
