@@ -100,19 +100,19 @@ networks:
         min_wallet_balance: 100000000    # 100 AKT  — Critical alert
         expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
         expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
-      # - name: hermes-relayer-02
-      #   health_endpoint: "https://hermesrelayerprod2.akash.pub/health"
-      #   wallet: "akash17ez5cs6mpa3fdn3g52grgjl6ghetsrrr5g2jpy"
-      #   info_wallet_balance: 1000000000  # 1000 AKT — Info alert
-      #   warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
-      #   min_wallet_balance: 100000000    # 100 AKT  — Critical alert
-      #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
-      #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
-      # - name: hermes-relayer-03
-      #   health_endpoint: "https://hermesrelayerprod3.akash.pub/health"
-      #   wallet: "akash1dv7vtjmydlzn3mrccz0qh2wgdrgpx7frmg3xda"
-      #   info_wallet_balance: 1000000000  # 1000 AKT — Info alert
-      #   warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
-      #   min_wallet_balance: 100000000    # 100 AKT  — Critical alert
-      #   expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
-      #   expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
+      - name: hermes-relayer-02
+        health_endpoint: "https://hermesrelayerprod2.akash.pub/health"
+        wallet: "akash17ez5cs6mpa3fdn3g52grgjl6ghetsrrr5g2jpy"
+        info_wallet_balance: 1000000000  # 1000 AKT — Info alert
+        warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
+        min_wallet_balance: 100000000    # 100 AKT  — Critical alert
+        expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+        expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"
+      - name: hermes-relayer-03
+        health_endpoint: "https://hermesrelayerprod3.akash.pub/health"
+        wallet: "akash1dv7vtjmydlzn3mrccz0qh2wgdrgpx7frmg3xda"
+        info_wallet_balance: 1000000000  # 1000 AKT — Info alert
+        warn_wallet_balance: 500000000   # 500 AKT  — Warning alert
+        min_wallet_balance: 100000000    # 100 AKT  — Critical alert
+        expected_price_feed_id: "0x4ea5bb4d2f5900cc2e97ba534240950740b4d3b89fe712a94a7304fd2fd92702"
+        expected_contract_address: "akash1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqyagled"

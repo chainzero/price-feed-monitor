@@ -36,13 +36,14 @@ import (
 // All four conditions are tracked independently with their own alert keys so
 // that each can resolve separately as the system recovers.
 type StatusMonitor struct {
-	network                config.NetworkConfig
-	cfg                    config.BMEConfig
-	alerter                *alerting.Slack
-	logger                 *slog.Logger
-	client                 *http.Client
-	consecutiveFailures    int // API unreachable
-	consecutiveHaltedPolls int // mints or refunds halted
+	network                      config.NetworkConfig
+	cfg                          config.BMEConfig
+	alerter                      *alerting.Slack
+	logger                       *slog.Logger
+	client                       *http.Client
+	consecutiveFailures          int // API unreachable
+	consecutiveHaltedPolls       int // mints or refunds halted
+	consecutiveCollateralBreaches int // ratio below warn or halt threshold
 }
 
 func NewStatusMonitor(
@@ -197,58 +198,113 @@ func (m *StatusMonitor) check(ctx context.Context) {
 		"refunds_allowed", s.RefundsAllowed,
 	)
 
+	// --- Consistency guard ---
+	//
+	// A collateral ratio of zero with a healthy status and mints/refunds allowed is
+	// self-contradictory: the chain would halt minting long before CR reached zero.
+	// This indicates a transient bad read from the API node (e.g. mid-block state,
+	// node sync gap). We notify so the event is visible but skip threshold checks
+	// for this poll to avoid a false Critical alert.
+	if ratio == 0 && s.Status == "mint_status_healthy" && s.MintsAllowed && s.RefundsAllowed {
+		m.logger.Warn("BME API returned inconsistent response",
+			"collateral_ratio", ratio,
+			"status", s.Status,
+			"mints_allowed", s.MintsAllowed,
+			"refunds_allowed", s.RefundsAllowed,
+		)
+		m.alerter.Send(types.Alert{
+			Key:      fmt.Sprintf("bme_inconsistent_%s", m.network.Name),
+			Severity: types.SeverityWarning,
+			Title:    fmt.Sprintf("BME API INCONSISTENT RESPONSE — %s", m.network.Name),
+			Body: fmt.Sprintf(
+				"Network: %s\n"+
+					"BME Status: %s\n\n"+
+					"The BME API returned internally inconsistent data:\n"+
+					"  Collateral Ratio: %.6f  ← impossible if system is healthy\n"+
+					"  Status:           %s\n"+
+					"  Mints Allowed:    %v\n"+
+					"  Refunds Allowed:  %v\n\n"+
+					"A ratio of zero is irreconcilable with a healthy status — the chain\n"+
+					"would have halted minting well before CR reached zero. This is most\n"+
+					"likely a transient API read error during a block transition.\n\n"+
+					"Threshold alerts are suppressed for this poll cycle.\n"+
+					"If this recurs, investigate the API node for state inconsistencies.",
+				m.network.Name, s.Status,
+				ratio, s.Status, s.MintsAllowed, s.RefundsAllowed,
+			),
+		})
+		return
+	}
+
 	// --- Check 1: Collateral ratio thresholds ---
 	//
 	// A healthy system has a very large collateral ratio (e.g. 210x). The ratio only
-	// approaches the thresholds under stress. Two severity levels:
-	//   - Below warn_threshold: Warning — approaching halt, team should investigate
-	//   - Below halt_threshold: Critical — at or past the point where minting halts
-	//
-	// A single alert key is used for both levels. The Slack alerter will bypass the
-	// cooldown automatically if severity escalates from Warning to Critical.
+	// approaches the thresholds under genuine stress. Escalation mirrors the halt
+	// check: Warning on the first breach, Critical on the second, Emergency on the
+	// third and beyond (then suppressed until resolved). This filters transient
+	// single-poll anomalies while still alerting promptly on sustained breaches.
 	collateralKey := fmt.Sprintf("bme_collateral_%s", m.network.Name)
-	if ratio < haltThreshold {
-		m.alerter.Send(types.Alert{
-			Key:      collateralKey,
-			Severity: types.SeverityCritical,
-			Title:    fmt.Sprintf("BME COLLATERAL RATIO CRITICAL — %s", m.network.Name),
-			Body: fmt.Sprintf(
-				"Network: %s\n"+
-					"BME Status: %s\n\n"+
-					"Collateral Ratio: %.6f\n"+
+	if ratio < warnThreshold {
+		m.consecutiveCollateralBreaches++
+
+		if m.consecutiveCollateralBreaches > 3 {
+			// Emergency already sent — suppress until resolved.
+			return
+		}
+
+		var sev types.Severity
+		var title string
+		var thresholdLine string
+
+		belowHalt := ratio < haltThreshold
+		switch m.consecutiveCollateralBreaches {
+		case 1:
+			sev = types.SeverityWarning
+			title = fmt.Sprintf("BME COLLATERAL RATIO WARNING — %s", m.network.Name)
+		case 2:
+			sev = types.SeverityCritical
+			title = fmt.Sprintf("BME COLLATERAL RATIO CRITICAL — %s", m.network.Name)
+		default:
+			sev = types.SeverityEmergency
+			title = fmt.Sprintf("BME COLLATERAL RATIO EMERGENCY — %s (final alert)", m.network.Name)
+		}
+
+		if belowHalt {
+			thresholdLine = fmt.Sprintf(
+				"Collateral Ratio: %.6f\n"+
 					"Halt Threshold:   %.6f  ← BREACHED\n"+
-					"Warn Threshold:   %.6f\n\n"+
-					"The collateral ratio has fallen below the halt threshold.\n"+
-					"Minting may be halted or imminent. Immediate action required.\n\n"+
-					"Mints Allowed:   %v\n"+
-					"Refunds Allowed: %v",
-				m.network.Name, s.Status,
-				ratio, haltThreshold, warnThreshold,
-				s.MintsAllowed, s.RefundsAllowed,
-			),
-		})
-	} else if ratio < warnThreshold {
+					"Warn Threshold:   %.6f  ← BREACHED",
+				ratio, haltThreshold, warnThreshold)
+		} else {
+			thresholdLine = fmt.Sprintf(
+				"Collateral Ratio: %.6f\n"+
+					"Warn Threshold:   %.6f  ← BREACHED\n"+
+					"Halt Threshold:   %.6f",
+				ratio, warnThreshold, haltThreshold)
+		}
+
 		m.alerter.Send(types.Alert{
 			Key:      collateralKey,
-			Severity: types.SeverityWarning,
-			Title:    fmt.Sprintf("BME COLLATERAL RATIO WARNING — %s", m.network.Name),
+			Severity: sev,
+			Title:    title,
 			Body: fmt.Sprintf(
 				"Network: %s\n"+
 					"BME Status: %s\n\n"+
-					"Collateral Ratio: %.6f\n"+
-					"Warn Threshold:   %.6f  ← BREACHED\n"+
-					"Halt Threshold:   %.6f\n\n"+
-					"The collateral ratio is below the warning threshold.\n"+
-					"System is approaching the halt threshold — investigate now.\n\n"+
+					"%s\n\n"+
 					"Mints Allowed:   %v\n"+
-					"Refunds Allowed: %v",
+					"Refunds Allowed: %v\n\n"+
+					"Consecutive breach polls: %d",
 				m.network.Name, s.Status,
-				ratio, warnThreshold, haltThreshold,
+				thresholdLine,
 				s.MintsAllowed, s.RefundsAllowed,
+				m.consecutiveCollateralBreaches,
 			),
 		})
 	} else {
-		// Ratio is healthy — resolve any outstanding collateral alert.
+		// Ratio is healthy — reset counter and resolve any outstanding collateral alert.
+		if m.consecutiveCollateralBreaches > 0 {
+			m.consecutiveCollateralBreaches = 0
+		}
 		m.alerter.Resolve(
 			collateralKey,
 			fmt.Sprintf("BME COLLATERAL RATIO HEALTHY — %s", m.network.Name),
