@@ -27,7 +27,7 @@ Kubernetes manifests (`deployment.yaml`, `configmap.yaml`) are maintained in the
 
 ### Current image
 ```
-scarruthers/price-feed-monitor:v8
+scarruthers/price-feed-monitor:v9
 ```
 
 ---

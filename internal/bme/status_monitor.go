@@ -202,20 +202,31 @@ func (m *StatusMonitor) check(ctx context.Context) {
 	//
 	// A collateral ratio of zero with a healthy status and mints/refunds allowed is
 	// self-contradictory: the chain would halt minting long before CR reached zero.
-	// This indicates a transient bad read from the API node (e.g. mid-block state,
-	// node sync gap). We notify so the event is visible but skip threshold checks
-	// for this poll to avoid a false Critical alert.
+	// Alert so the event is visible but skip threshold checks for this poll to
+	// avoid a false Critical alert on the ratio itself.
 	if ratio == 0 && s.Status == "mint_status_healthy" && s.MintsAllowed && s.RefundsAllowed {
-		// Zero ratio with healthy status is a known transient: the Cosmos SDK
-		// returns "0" for collateral_ratio when the value is uninitialized at
-		// query time (e.g. between block boundaries or before first BME mint).
-		// The chain's own status and flags are authoritative — no alert needed.
-		// Logged here for observability; threshold checks are skipped this poll.
 		m.logger.Warn("BME API returned zero collateral_ratio with healthy status — skipping poll cycle",
 			"status", s.Status,
 			"mints_allowed", s.MintsAllowed,
 			"refunds_allowed", s.RefundsAllowed,
 		)
+		m.alerter.Send(types.Alert{
+			Key:      fmt.Sprintf("bme_inconsistent_%s", m.network.Name),
+			Severity: types.SeverityWarning,
+			Title:    fmt.Sprintf("BME API INCONSISTENT RESPONSE — %s", m.network.Name),
+			Body: fmt.Sprintf(
+				"Network: %s\n"+
+					"BME Status: %s\n\n"+
+					"collateral_ratio returned 0 but status is healthy and mints/refunds are allowed.\n\n"+
+					"Mints Allowed:   %v\n"+
+					"Refunds Allowed: %v\n\n"+
+					"This is self-contradictory — the chain would halt minting before CR reached zero.\n"+
+					"Threshold checks skipped for this poll cycle.\n"+
+					"Investigate the BME module state on the chain.",
+				m.network.Name, s.Status,
+				s.MintsAllowed, s.RefundsAllowed,
+			),
+		})
 		return
 	}
 
