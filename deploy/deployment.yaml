@@ -18,10 +18,6 @@ spec:
         app: price-feed-monitor
     spec:
       # No service account needed — this app makes only outbound HTTP calls.
-      # Schedule on the control-plane node which has internet egress.
-      # The worker node has no external IP and no Cloud NAT configured.
-      nodeSelector:
-        kubernetes.io/hostname: provider-monitor-k3cluster
       automountServiceAccountToken: false
 
       containers:
