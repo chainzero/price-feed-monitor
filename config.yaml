@@ -88,8 +88,8 @@ announcement_monitor:
     poll_interval: 1h
 
 networks:
-  - name: testnet-oracle
-    akash_api: "https://testnetoracleapi.akashnet.net"
+  - name: mainnet
+    akash_api: "https://rpc.akt.dev/rest"
     wormhole_contract: "akash14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9sggdamt"
     hermes_relayers:
       - name: hermes-relayer-01
