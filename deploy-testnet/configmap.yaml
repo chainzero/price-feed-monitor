@@ -38,16 +38,16 @@ data:
       poll_interval: 30s
       consecutive_failures_threshold: 3
 
-    # Component 3: Guardian Set Currency (Ethereum RPC) — disabled for testnet
+    # Component 3: Guardian Set Currency (Ethereum RPC)
     guardian_set_monitor:
-      enabled: false
+      enabled: true
       poll_interval: 10m
       ethereum_rpc: "https://ethereum-rpc.publicnode.com"
       wormhole_contract: "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"
 
-    # Component 5: Wormholescan Guardian Set Monitor — disabled for testnet
+    # Component 5: Wormholescan Guardian Set Monitor
     wormholescan_monitor:
-      enabled: false
+      enabled: true
       poll_interval: 30m
       api_base_url: "https://api.wormholescan.io"
       governance_emitter: "0000000000000000000000000000000000000000000000000000000000000004"
