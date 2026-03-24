@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: price-feed-monitor-sandbox
+  namespace: akash-services
+  labels:
+    app: price-feed-monitor-sandbox
+spec:
+  # Single replica — alert cooldown state is held in memory.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: price-feed-monitor-sandbox
+  template:
+    metadata:
+      labels:
+        app: price-feed-monitor-sandbox
+    spec:
+      # No service account needed — this app makes only outbound HTTP calls.
+      automountServiceAccountToken: false
+
+      containers:
+        - name: price-feed-monitor-sandbox
+          image: scarruthers/price-feed-monitor:v9
+          imagePullPolicy: Always
+
+          env:
+            # Tell the app where to find the config file (mounted from ConfigMap below).
+            - name: PRICE_FEED_MONITOR_CONFIG
+              value: /etc/price-feed-monitor/config.yaml
+
+            # Slack webhook URL — sourced from Secret, overrides the placeholder value
+            # in config.yaml. This is the only credential this app requires.
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: price-feed-monitor-sandbox-secrets
+                  key: slack-webhook-url
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/price-feed-monitor
+              readOnly: true
+
+      volumes:
+        - name: config
+          configMap:
+            name: price-feed-monitor-sandbox-config
+
+      restartPolicy: Always

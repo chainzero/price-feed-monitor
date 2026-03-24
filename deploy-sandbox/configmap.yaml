@@ -1,0 +1,86 @@
+# price-feed-monitor-sandbox ConfigMap
+#
+# Sandbox network deployment — all monitoring enabled except Hermes relayers.
+#
+# To update config:
+#   1. Edit the config.yaml data below
+#   2. kubectl apply -f deploy-sandbox/configmap.yaml
+#   3. kubectl rollout restart deployment/price-feed-monitor-sandbox -n akash-services
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: price-feed-monitor-sandbox-config
+  namespace: akash-services
+data:
+  config.yaml: |
+    slack:
+      webhook_url: "placeholder-overridden-by-secret"
+      channel: "#akash-bme-monitor-sandbox"
+
+    report:
+      timezone: "America/Chicago"
+      schedule_times:
+        - "08:00"   # Morning health check
+        - "20:00"   # Evening health check
+
+    # Component 1: Oracle Price Health
+    oracle_price_monitor:
+      enabled: true
+      poll_interval: 60s
+      thresholds:
+        warning_age: 5m
+        critical_age: 15m
+        emergency_age: 30m
+
+    # Component 2: Hermes Relayer Health — disabled, no relayers on sandbox
+    hermes_health_monitor:
+      enabled: false
+      poll_interval: 30s
+      consecutive_failures_threshold: 3
+
+    # Component 3: Guardian Set Currency (Ethereum RPC)
+    guardian_set_monitor:
+      enabled: true
+      poll_interval: 10m
+      ethereum_rpc: "https://ethereum-rpc.publicnode.com"
+      wormhole_contract: "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"
+
+    # Component 5: Wormholescan Guardian Set Monitor
+    wormholescan_monitor:
+      enabled: true
+      poll_interval: 30m
+      api_base_url: "https://api.wormholescan.io"
+      governance_emitter: "0000000000000000000000000000000000000000000000000000000000000004"
+
+    # Component 6: BME Status Monitor
+    bme_monitor:
+      enabled: true
+      poll_interval: 60s
+
+    # Component 4: Guardian Update Announcements
+    announcement_monitor:
+      enabled: true
+      etherscan:
+        enabled: false
+        api_key: "YOUR_ETHERSCAN_API_KEY"
+        poll_interval: 5m
+      pyth_forum:
+        enabled: true
+        url: "https://forum.pyth.network/c/proposals/7.rss"
+        poll_interval: 30m
+        keywords:
+          - "guardian"
+          - "guardian set"
+          - "wormhole core"
+          - "guardian rotation"
+          - "guardian key"
+      github:
+        enabled: false
+        repo: "wormhole-foundation/wormhole"
+        poll_interval: 1h
+
+    networks:
+      - name: sandbox-2
+        akash_api: "https://api.sandbox-2.aksh.pw:443"
+        wormhole_contract: "akash14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9sggdamt"
+        hermes_relayers: []
