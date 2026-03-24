@@ -22,12 +22,12 @@ import (
 // of the running monitor goroutines.
 type Reporter struct {
 	cfg     *config.Config
-	alerter *alerting.Slack
+	alerter alerting.Alerter
 	logger  *slog.Logger
 	client  *http.Client
 }
 
-func New(cfg *config.Config, alerter *alerting.Slack, logger *slog.Logger) *Reporter {
+func New(cfg *config.Config, alerter alerting.Alerter, logger *slog.Logger) *Reporter {
 	return &Reporter{
 		cfg:     cfg,
 		alerter: alerter,

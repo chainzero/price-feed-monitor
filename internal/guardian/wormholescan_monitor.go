@@ -39,7 +39,7 @@ type WormholescanMonitor struct {
 	cfg                 config.WormholescanConfig
 	networks            []config.NetworkConfig
 	wormholescan        *WormholescanClient
-	alerter             *alerting.Slack
+	alerter             alerting.Alerter
 	logger              *slog.Logger
 	lastKnownIndex      uint32
 	initialized         bool
@@ -49,7 +49,7 @@ type WormholescanMonitor struct {
 func NewWormholescanMonitor(
 	cfg config.WormholescanConfig,
 	networks []config.NetworkConfig,
-	alerter *alerting.Slack,
+	alerter alerting.Alerter,
 	logger *slog.Logger,
 ) *WormholescanMonitor {
 	return &WormholescanMonitor{

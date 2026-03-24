@@ -33,7 +33,7 @@ type SyncMonitor struct {
 	eth           *EthereumClient
 	networks      []config.NetworkConfig
 	netStates     map[string]*networkState
-	alerter       *alerting.Slack
+	alerter       alerting.Alerter
 	logger        *slog.Logger
 	lastKnownIndex uint32
 	initialized   bool
@@ -43,7 +43,7 @@ type SyncMonitor struct {
 func NewSyncMonitor(
 	cfg config.GuardianSetConfig,
 	networks []config.NetworkConfig,
-	alerter *alerting.Slack,
+	alerter alerting.Alerter,
 	logger *slog.Logger,
 ) *SyncMonitor {
 	states := make(map[string]*networkState, len(networks))

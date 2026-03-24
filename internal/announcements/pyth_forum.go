@@ -37,14 +37,14 @@ type rssFeed struct {
 // Only items published after the first successful poll trigger alerts.
 type PythForumMonitor struct {
 	cfg       config.PythForumConfig
-	alerter   *alerting.Slack
+	alerter   alerting.Alerter
 	logger    *slog.Logger
 	client    *http.Client
 	seenGUIDs map[string]bool
 	baselined bool
 }
 
-func NewPythForumMonitor(cfg config.PythForumConfig, alerter *alerting.Slack, logger *slog.Logger) *PythForumMonitor {
+func NewPythForumMonitor(cfg config.PythForumConfig, alerter alerting.Alerter, logger *slog.Logger) *PythForumMonitor {
 	return &PythForumMonitor{
 		cfg:       cfg,
 		alerter:   alerter,

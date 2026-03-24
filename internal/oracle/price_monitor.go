@@ -22,7 +22,7 @@ import (
 type PriceMonitor struct {
 	network config.NetworkConfig
 	cfg     config.OraclePriceConfig
-	alerter *alerting.Slack
+	alerter alerting.Alerter
 	logger  *slog.Logger
 	client  *http.Client
 }
@@ -30,7 +30,7 @@ type PriceMonitor struct {
 func NewPriceMonitor(
 	network config.NetworkConfig,
 	cfg config.OraclePriceConfig,
-	alerter *alerting.Slack,
+	alerter alerting.Alerter,
 	logger *slog.Logger,
 ) *PriceMonitor {
 	return &PriceMonitor{

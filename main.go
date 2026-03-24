@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/akash-network/price-feed-monitor/internal/alerting"
@@ -16,6 +17,7 @@ import (
 	"github.com/akash-network/price-feed-monitor/internal/hermes"
 	"github.com/akash-network/price-feed-monitor/internal/oracle"
 	"github.com/akash-network/price-feed-monitor/internal/report"
+	"github.com/akash-network/price-feed-monitor/internal/types"
 )
 
 func main() {
@@ -40,7 +42,23 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	alerter := alerting.NewSlack(cfg.Slack.WebhookURL)
+	// Build alerter — Slack always active; SendGrid added when email is enabled and API key present.
+	slackAlerter := alerting.NewSlack(cfg.Slack.WebhookURL)
+	var alerter alerting.Alerter = slackAlerter
+	if cfg.Email.Enabled {
+		if cfg.Email.APIKey == "" {
+			slog.Warn("email alerting enabled but SENDGRID_API_KEY is not set — email alerts disabled")
+		} else {
+			minSev := parseMinSeverity(cfg.Email.MinSeverity)
+			emailAlerter := alerting.NewSendGrid(cfg.Email.APIKey, cfg.Email.From, cfg.Email.To, minSev)
+			alerter = alerting.NewMulti(slackAlerter, emailAlerter)
+			slog.Info("email alerting enabled via SendGrid",
+				"from", cfg.Email.From,
+				"recipients", len(cfg.Email.To),
+				"min_severity", minSev.String(),
+			)
+		}
+	}
 
 	// Component 1: Oracle Price Health
 	if cfg.OraclePriceMonitor.Enabled {
@@ -90,7 +108,7 @@ func main() {
 		slog.Info("pyth forum monitor enabled")
 	}
 
-	// Startup summary + daily 8 AM CT health check
+	// Startup summary + daily health check
 	reporter := report.New(cfg, alerter, logger)
 	reporter.PostStartup(ctx)
 	go reporter.RunDailySchedule(ctx)
@@ -98,4 +116,21 @@ func main() {
 	slog.Info("price-feed-monitor started")
 	<-ctx.Done()
 	slog.Info("shutting down")
+}
+
+// parseMinSeverity converts a config string to a Severity level.
+// Defaults to Warning if unrecognised.
+func parseMinSeverity(s string) types.Severity {
+	switch strings.ToLower(s) {
+	case "info":
+		return types.SeverityInfo
+	case "warning":
+		return types.SeverityWarning
+	case "critical":
+		return types.SeverityCritical
+	case "emergency":
+		return types.SeverityEmergency
+	default:
+		return types.SeverityWarning
+	}
 }

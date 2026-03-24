@@ -38,7 +38,7 @@ import (
 type StatusMonitor struct {
 	network                      config.NetworkConfig
 	cfg                          config.BMEConfig
-	alerter                      *alerting.Slack
+	alerter                      alerting.Alerter
 	logger                       *slog.Logger
 	client                       *http.Client
 	consecutiveFailures          int // API unreachable
@@ -49,7 +49,7 @@ type StatusMonitor struct {
 func NewStatusMonitor(
 	network config.NetworkConfig,
 	cfg config.BMEConfig,
-	alerter *alerting.Slack,
+	alerter alerting.Alerter,
 	logger *slog.Logger,
 ) *StatusMonitor {
 	return &StatusMonitor{

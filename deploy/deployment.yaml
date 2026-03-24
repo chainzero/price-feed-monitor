@@ -22,7 +22,7 @@ spec:
 
       containers:
         - name: price-feed-monitor
-          image: scarruthers/price-feed-monitor:v9
+          image: scarruthers/price-feed-monitor:v10
           imagePullPolicy: Always
 
           env:
@@ -31,12 +31,21 @@ spec:
               value: /etc/price-feed-monitor/config.yaml
 
             # Slack webhook URL — sourced from Secret, overrides the placeholder value
-            # in config.yaml. This is the only credential this app requires.
+            # in config.yaml.
             - name: SLACK_WEBHOOK_URL
               valueFrom:
                 secretKeyRef:
                   name: price-feed-monitor-secrets
                   key: slack-webhook-url
+
+            # SendGrid API key — sourced from Secret. Optional: if absent, email
+            # alerting is disabled even when email.enabled=true in the configmap.
+            - name: SENDGRID_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: price-feed-monitor-secrets
+                  key: sendgrid-api-key
+                  optional: true
 
           resources:
             requests:

@@ -11,6 +11,7 @@ import (
 // Config is the top-level configuration structure loaded from config.yaml.
 type Config struct {
 	Slack                SlackConfig           `yaml:"slack"`
+	Email                EmailConfig           `yaml:"email"`
 	Report               ReportConfig          `yaml:"report"`
 	OraclePriceMonitor   OraclePriceConfig     `yaml:"oracle_price_monitor"`
 	HermesHealthMonitor  HermesHealthConfig    `yaml:"hermes_health_monitor"`
@@ -19,6 +20,20 @@ type Config struct {
 	BMEMonitor           BMEConfig             `yaml:"bme_monitor"`
 	AnnouncementMonitor  AnnouncementConfig    `yaml:"announcement_monitor"`
 	Networks             []NetworkConfig       `yaml:"networks"`
+}
+
+// EmailConfig configures the SendGrid email alerting backend.
+// The API key is never stored in the configmap — it is injected at runtime
+// via the SENDGRID_API_KEY environment variable sourced from a K8s Secret.
+type EmailConfig struct {
+	Enabled     bool     `yaml:"enabled"`
+	From        string   `yaml:"from"`
+	To          []string `yaml:"to"`
+	// MinSeverity is the minimum alert severity that triggers an email.
+	// Valid values: "warning", "critical", "emergency". Defaults to "warning".
+	MinSeverity string   `yaml:"min_severity"`
+	// APIKey is populated from the SENDGRID_API_KEY env var — never set in config.yaml.
+	APIKey      string   `yaml:"-"`
 }
 
 // ReportConfig controls the startup and scheduled health summary messages.
@@ -177,6 +192,9 @@ func Load(path string) (*Config, error) {
 	// In K8s, project secrets as env vars (envFrom: secretKeyRef).
 	if v := os.Getenv("SLACK_WEBHOOK_URL"); v != "" {
 		cfg.Slack.WebhookURL = v
+	}
+	if v := os.Getenv("SENDGRID_API_KEY"); v != "" {
+		cfg.Email.APIKey = v
 	}
 
 	if err := cfg.validate(); err != nil {

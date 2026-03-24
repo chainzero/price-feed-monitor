@@ -28,7 +28,7 @@ type relayerState struct {
 type HealthMonitor struct {
 	network config.NetworkConfig
 	cfg     config.HermesHealthConfig
-	alerter *alerting.Slack
+	alerter alerting.Alerter
 	logger  *slog.Logger
 	client  *http.Client
 	states  map[string]*relayerState // keyed by relayer name
@@ -37,7 +37,7 @@ type HealthMonitor struct {
 func NewHealthMonitor(
 	network config.NetworkConfig,
 	cfg config.HermesHealthConfig,
-	alerter *alerting.Slack,
+	alerter alerting.Alerter,
 	logger *slog.Logger,
 ) *HealthMonitor {
 	states := make(map[string]*relayerState, len(network.HermesRelayers))

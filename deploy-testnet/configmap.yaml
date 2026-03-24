@@ -17,6 +17,12 @@ data:
       webhook_url: "placeholder-overridden-by-secret"
       channel: "#akash-bme-monitor-testnet"
 
+    email:
+      enabled: false
+      from: ""
+      to: []
+      min_severity: "warning"
+
     report:
       timezone: "America/Chicago"
       schedule_times:
