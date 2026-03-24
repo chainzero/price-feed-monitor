@@ -70,8 +70,17 @@ func (s *SendGrid) send(subject, body string) {
 	message.AddContent(mail.NewContent("text/plain", body))
 
 	client := sendgridgo.NewSendClient(s.apiKey)
-	if _, err := client.Send(message); err != nil {
+	resp, err := client.Send(message)
+	if err != nil {
 		slog.Error("failed to send email via SendGrid", "subject", subject, "error", err)
+		return
+	}
+	if resp.StatusCode >= 300 {
+		slog.Error("SendGrid rejected email",
+			"subject", subject,
+			"status_code", resp.StatusCode,
+			"response_body", resp.Body,
+		)
 		return
 	}
 

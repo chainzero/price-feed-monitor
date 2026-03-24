@@ -24,7 +24,7 @@ data:
 
     email:
       enabled: true
-      from: "monitor@akash.network"
+      from: "support@akash.network"
       to:
         - "support@akash.network"
       min_severity: "warning"
