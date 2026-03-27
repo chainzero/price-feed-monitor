@@ -10,16 +10,16 @@ import (
 
 // Config is the top-level configuration structure loaded from config.yaml.
 type Config struct {
-	Slack                SlackConfig           `yaml:"slack"`
-	Email                EmailConfig           `yaml:"email"`
-	Report               ReportConfig          `yaml:"report"`
-	OraclePriceMonitor   OraclePriceConfig     `yaml:"oracle_price_monitor"`
-	HermesHealthMonitor  HermesHealthConfig    `yaml:"hermes_health_monitor"`
-	GuardianSetMonitor   GuardianSetConfig     `yaml:"guardian_set_monitor"`
-	WormholescanMonitor  WormholescanConfig    `yaml:"wormholescan_monitor"`
-	BMEMonitor           BMEConfig             `yaml:"bme_monitor"`
-	AnnouncementMonitor  AnnouncementConfig    `yaml:"announcement_monitor"`
-	Networks             []NetworkConfig       `yaml:"networks"`
+	Slack                SlackConfig        `yaml:"slack"`
+	Email                EmailConfig        `yaml:"email"`
+	Report               ReportConfig       `yaml:"report"`
+	OraclePriceMonitor   OraclePriceConfig  `yaml:"oracle_price_monitor"`
+	HermesHealthMonitor  HermesHealthConfig `yaml:"hermes_health_monitor"`
+	GuardianSetMonitor   GuardianSetConfig  `yaml:"guardian_set_monitor"`
+	WormholescanMonitor  WormholescanConfig `yaml:"wormholescan_monitor"`
+	BMEMonitor           BMEConfig          `yaml:"bme_monitor"`
+	AnnouncementMonitor  AnnouncementConfig `yaml:"announcement_monitor"`
+	Networks             []NetworkConfig    `yaml:"networks"`
 }
 
 // EmailConfig configures the SendGrid email alerting backend.
@@ -31,9 +31,9 @@ type EmailConfig struct {
 	To          []string `yaml:"to"`
 	// MinSeverity is the minimum alert severity that triggers an email.
 	// Valid values: "warning", "critical", "emergency". Defaults to "warning".
-	MinSeverity string   `yaml:"min_severity"`
+	MinSeverity string `yaml:"min_severity"`
 	// APIKey is populated from the SENDGRID_API_KEY env var — never set in config.yaml.
-	APIKey      string   `yaml:"-"`
+	APIKey string `yaml:"-"`
 }
 
 // ReportConfig controls the startup and scheduled health summary messages.
@@ -79,7 +79,7 @@ type GuardianSetConfig struct {
 // set monitor. This runs alongside Component 3 (Ethereum RPC) to provide a second
 // detection path that also retrieves the governance VAA needed for on-chain submission.
 type WormholescanConfig struct {
-	Enabled  bool     `yaml:"enabled"`
+	Enabled      bool     `yaml:"enabled"`
 	PollInterval Duration `yaml:"poll_interval"`
 
 	// APIBaseURL is the Wormholescan REST API base. Default is the public endpoint.
@@ -129,8 +129,11 @@ type GitHubConfig struct {
 }
 
 type NetworkConfig struct {
-	Name             string          `yaml:"name"`
-	AkashAPI         string          `yaml:"akash_api"`
+	Name string `yaml:"name"`
+	// AkashAPINodes is the list of Akash REST API base URLs to try in order.
+	// The first node that responds without a network error or 5xx is used.
+	// Configure multiple nodes for redundancy against single-node outages.
+	AkashAPINodes    []string        `yaml:"akash_api"`
 	WormholeContract string          `yaml:"wormhole_contract"`
 	HermesRelayers   []RelayerConfig `yaml:"hermes_relayers"`
 }
@@ -212,8 +215,8 @@ func (c *Config) validate() error {
 		if n.Name == "" {
 			return fmt.Errorf("networks[%d].name is required", i)
 		}
-		if n.AkashAPI == "" {
-			return fmt.Errorf("networks[%d].akash_api is required", i)
+		if len(n.AkashAPINodes) == 0 {
+			return fmt.Errorf("networks[%d].akash_api requires at least one node URL", i)
 		}
 	}
 	return nil

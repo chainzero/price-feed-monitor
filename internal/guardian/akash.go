@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/akash-network/price-feed-monitor/internal/akashclient"
 )
 
 // guardianSetInfoQuery is the base64-encoded CosmWasm smart query {"guardian_set_info": {}}.
@@ -20,15 +22,15 @@ const guardianSetInfoQuery = "eyJndWFyZGlhbl9zZXRfaW5mbyI6IHt9fQ=="
 // NOTE: This is NOT the source of truth. It is what we compare against
 // the authoritative Ethereum Wormhole contract data to detect drift.
 type AkashOracleClient struct {
-	apiURL           string
+	apiNodes         []string
 	network          string
 	wormholeContract string
 	client           *http.Client
 }
 
-func NewAkashOracleClient(apiURL, network, wormholeContract string) *AkashOracleClient {
+func NewAkashOracleClient(apiNodes []string, network, wormholeContract string) *AkashOracleClient {
 	return &AkashOracleClient{
-		apiURL:           apiURL,
+		apiNodes:         apiNodes,
 		network:          network,
 		wormholeContract: wormholeContract,
 		client:           &http.Client{Timeout: 10 * time.Second},
@@ -52,16 +54,12 @@ func (c *AkashOracleClient) GetGuardianAddresses(ctx context.Context) ([]string,
 		return nil, fmt.Errorf("wormhole_contract not configured for network %q", c.network)
 	}
 
-	url := fmt.Sprintf("%s/cosmwasm/wasm/v1/contract/%s/smart/%s",
-		c.apiURL, c.wormholeContract, guardianSetInfoQuery)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	path := fmt.Sprintf("/cosmwasm/wasm/v1/contract/%s/smart/%s",
+		c.wormholeContract, guardianSetInfoQuery)
+
+	resp, err := akashclient.Fetch(ctx, c.client, c.apiNodes, path)
 	if err != nil {
 		return nil, err
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 

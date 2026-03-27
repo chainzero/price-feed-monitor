@@ -87,6 +87,7 @@ data:
 
     networks:
       - name: testnet-oracle
-        akash_api: "https://testnetoracleapi.akashnet.net"
+        akash_api:
+          - "https://testnetoracleapi.akashnet.net"
         wormhole_contract: "akash14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9sggdamt"
         hermes_relayers: []

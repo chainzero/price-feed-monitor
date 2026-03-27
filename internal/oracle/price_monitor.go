@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/akash-network/price-feed-monitor/internal/akashclient"
 	"github.com/akash-network/price-feed-monitor/internal/alerting"
 	"github.com/akash-network/price-feed-monitor/internal/config"
 	"github.com/akash-network/price-feed-monitor/internal/types"
@@ -181,15 +182,10 @@ func (m *PriceMonitor) checkPrice(ctx context.Context) {
 }
 
 func (m *PriceMonitor) fetchLatestPrice(ctx context.Context) (*types.OraclePrice, error) {
-	url := fmt.Sprintf("%s/akash/oracle/v1/prices?pagination.limit=1", m.network.AkashAPI)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := akashclient.Fetch(ctx, m.client, m.network.AkashAPINodes,
+		"/akash/oracle/v1/prices?pagination.limit=1")
 	if err != nil {
 		return nil, err
-	}
-
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
@@ -307,15 +303,10 @@ func (m *PriceMonitor) checkWalletBalance(ctx context.Context, relayer config.Re
 }
 
 func (m *PriceMonitor) fetchWalletBalance(ctx context.Context, address string) (int64, error) {
-	url := fmt.Sprintf("%s/cosmos/bank/v1beta1/balances/%s", m.network.AkashAPI, address)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := akashclient.Fetch(ctx, m.client, m.network.AkashAPINodes,
+		"/cosmos/bank/v1beta1/balances/"+address)
 	if err != nil {
 		return 0, err
-	}
-
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 

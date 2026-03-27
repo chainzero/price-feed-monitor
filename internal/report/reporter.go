@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/akash-network/price-feed-monitor/internal/akashclient"
 	"github.com/akash-network/price-feed-monitor/internal/alerting"
 	"github.com/akash-network/price-feed-monitor/internal/config"
 	"github.com/akash-network/price-feed-monitor/internal/guardian"
@@ -103,7 +104,7 @@ func (r *Reporter) post(ctx context.Context, header string) {
 		fmt.Fprintf(&b, "━━━ Network: %s ━━━\n\n", network.Name)
 
 		// Oracle price
-		price, priceAge, err := r.fetchOraclePrice(ctx, network.AkashAPI)
+		price, priceAge, err := r.fetchOraclePrice(ctx, network.AkashAPINodes)
 		if err != nil {
 			fmt.Fprintf(&b, "Oracle Price: ❌ unreachable (%s)\n\n", err)
 		} else {
@@ -126,7 +127,7 @@ func (r *Reporter) post(ctx context.Context, header string) {
 
 		// BME status
 		if r.cfg.BMEMonitor.Enabled {
-			r.appendBMEStatus(ctx, &b, network.AkashAPI)
+			r.appendBMEStatus(ctx, &b, network.AkashAPINodes)
 		}
 
 		// Guardian set status
@@ -163,7 +164,7 @@ func (r *Reporter) appendRelayerStatus(
 
 	walletStr := ""
 	if relayer.Wallet != "" {
-		balanceUAKT, err := r.fetchWalletBalance(ctx, network.AkashAPI, relayer.Wallet)
+		balanceUAKT, err := r.fetchWalletBalance(ctx, network.AkashAPINodes, relayer.Wallet)
 		if err != nil {
 			walletStr = "wallet: ❌ unavailable"
 		} else {
@@ -190,23 +191,16 @@ func (r *Reporter) appendRelayerStatus(
 
 // reporterBMEStatus is a local mirror of the BME API response fields we need.
 type reporterBMEStatus struct {
-	Status         string `json:"status"`
+	Status          string `json:"status"`
 	CollateralRatio string `json:"collateral_ratio"`
-	WarnThreshold  string `json:"warn_threshold"`
-	HaltThreshold  string `json:"halt_threshold"`
-	MintsAllowed   bool   `json:"mints_allowed"`
-	RefundsAllowed bool   `json:"refunds_allowed"`
+	WarnThreshold   string `json:"warn_threshold"`
+	HaltThreshold   string `json:"halt_threshold"`
+	MintsAllowed    bool   `json:"mints_allowed"`
+	RefundsAllowed  bool   `json:"refunds_allowed"`
 }
 
-func (r *Reporter) appendBMEStatus(ctx context.Context, b *strings.Builder, akashAPI string) {
-	url := akashAPI + "/akash/bme/v1/status"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		fmt.Fprintf(b, "BME Status: ❌ request error (%s)\n\n", err)
-		return
-	}
-
-	resp, err := r.client.Do(req)
+func (r *Reporter) appendBMEStatus(ctx context.Context, b *strings.Builder, nodes []string) {
+	resp, err := akashclient.Fetch(ctx, r.client, nodes, "/akash/bme/v1/status")
 	if err != nil {
 		fmt.Fprintf(b, "BME Status: ❌ unreachable (%s)\n\n", err)
 		return
@@ -269,7 +263,7 @@ func (r *Reporter) appendGuardianStatus(
 	}
 
 	// Fetch Akash on-chain guardian addresses for this network.
-	akashClient := guardian.NewAkashOracleClient(network.AkashAPI, network.Name, network.WormholeContract)
+	akashClient := guardian.NewAkashOracleClient(network.AkashAPINodes, network.Name, network.WormholeContract)
 	akashAddresses, err := akashClient.GetGuardianAddresses(ctx)
 	if err != nil {
 		fmt.Fprintf(b, "Guardian Set: global index %d (%d guardians)  |  Akash: ❌ params unreachable (%s)\n\n",
@@ -300,14 +294,8 @@ func (r *Reporter) appendGuardianStatus(
 		syncIcon, globalIndex, len(globalAddresses), syncLabel)
 }
 
-func (r *Reporter) fetchOraclePrice(ctx context.Context, akashAPI string) (price float64, age time.Duration, err error) {
-	url := fmt.Sprintf("%s/akash/oracle/v1/prices?pagination.limit=1", akashAPI)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	resp, err := r.client.Do(req)
+func (r *Reporter) fetchOraclePrice(ctx context.Context, nodes []string) (price float64, age time.Duration, err error) {
+	resp, err := akashclient.Fetch(ctx, r.client, nodes, "/akash/oracle/v1/prices?pagination.limit=1")
 	if err != nil {
 		return 0, 0, err
 	}
@@ -362,14 +350,8 @@ func (r *Reporter) fetchHealth(ctx context.Context, endpoint string) (*types.Her
 	return &h, nil
 }
 
-func (r *Reporter) fetchWalletBalance(ctx context.Context, akashAPI, address string) (int64, error) {
-	url := fmt.Sprintf("%s/cosmos/bank/v1beta1/balances/%s", akashAPI, address)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, err
-	}
-
-	resp, err := r.client.Do(req)
+func (r *Reporter) fetchWalletBalance(ctx context.Context, nodes []string, address string) (int64, error) {
+	resp, err := akashclient.Fetch(ctx, r.client, nodes, "/cosmos/bank/v1beta1/balances/"+address)
 	if err != nil {
 		return 0, err
 	}

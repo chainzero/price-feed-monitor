@@ -28,7 +28,8 @@ slack:
   channel: "#test"
 networks:
   - name: mainnet
-    akash_api: "https://api.example.com"
+    akash_api:
+      - "https://api.example.com"
 `
 
 func TestLoad_Minimal(t *testing.T) {
@@ -75,7 +76,8 @@ slack:
   channel: "#test"
 networks:
   - name: mainnet
-    akash_api: "https://api.example.com"
+    akash_api:
+      - "https://api.example.com"
 `
 	path := writeTemp(t, yaml)
 	_, err := Load(path)
@@ -89,7 +91,8 @@ func TestLoad_MissingNetworkName(t *testing.T) {
 slack:
   webhook_url: "https://hooks.slack.com/services/TEST"
 networks:
-  - akash_api: "https://api.example.com"
+  - akash_api:
+      - "https://api.example.com"
 `
 	path := writeTemp(t, yaml)
 	_, err := Load(path)
@@ -176,7 +179,8 @@ slack:
   webhook_url: "https://hooks.slack.com/services/TEST"
 networks:
   - name: mainnet
-    akash_api: "https://api.example.com"
+    akash_api:
+      - "https://api.example.com"
 bme_monitor:
   enabled: true
   ` + tc.yaml + `
@@ -200,7 +204,8 @@ slack:
   webhook_url: "https://hooks.slack.com/services/TEST"
 networks:
   - name: mainnet
-    akash_api: "https://api.example.com"
+    akash_api:
+      - "https://api.example.com"
 bme_monitor:
   enabled: true
   poll_interval: "not-a-duration"
@@ -218,11 +223,14 @@ slack:
   webhook_url: "https://hooks.slack.com/services/TEST"
 networks:
   - name: mainnet
-    akash_api: "https://api.mainnet.com"
+    akash_api:
+      - "https://api.mainnet.com"
   - name: testnet
-    akash_api: "https://api.testnet.com"
+    akash_api:
+      - "https://api.testnet.com"
   - name: sandbox
-    akash_api: "https://api.sandbox.com"
+    akash_api:
+      - "https://api.sandbox.com"
 `
 	path := writeTemp(t, yaml)
 	cfg, err := Load(path)
@@ -234,5 +242,46 @@ networks:
 	}
 	if cfg.Networks[1].Name != "testnet" {
 		t.Errorf("networks[1].Name = %q, want testnet", cfg.Networks[1].Name)
+	}
+}
+
+func TestLoad_MultipleAkashNodes(t *testing.T) {
+	yaml := `
+slack:
+  webhook_url: "https://hooks.slack.com/services/TEST"
+networks:
+  - name: mainnet
+    akash_api:
+      - "https://node1.example.com"
+      - "https://node2.example.com"
+      - "https://node3.example.com"
+`
+	path := writeTemp(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	nodes := cfg.Networks[0].AkashAPINodes
+	if len(nodes) != 3 {
+		t.Fatalf("expected 3 nodes, got %d", len(nodes))
+	}
+	if nodes[1] != "https://node2.example.com" {
+		t.Errorf("nodes[1] = %q, want node2", nodes[1])
+	}
+}
+
+func TestLoad_EmptyAkashNodes(t *testing.T) {
+	// akash_api with no entries should fail validation.
+	yaml := `
+slack:
+  webhook_url: "https://hooks.slack.com/services/TEST"
+networks:
+  - name: mainnet
+    akash_api: []
+`
+	path := writeTemp(t, yaml)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected validation error for empty akash_api, got nil")
 	}
 }

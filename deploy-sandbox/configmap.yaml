@@ -87,6 +87,7 @@ data:
 
     networks:
       - name: sandbox-2
-        akash_api: "https://api.sandbox-2.aksh.pw:443"
+        akash_api:
+          - "https://api.sandbox-2.aksh.pw:443"
         wormhole_contract: "akash14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9sggdamt"
         hermes_relayers: []

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akash-network/price-feed-monitor/internal/akashclient"
 	"github.com/akash-network/price-feed-monitor/internal/alerting"
 	"github.com/akash-network/price-feed-monitor/internal/config"
 	"github.com/akash-network/price-feed-monitor/internal/types"
@@ -36,13 +37,13 @@ import (
 // All four conditions are tracked independently with their own alert keys so
 // that each can resolve separately as the system recovers.
 type StatusMonitor struct {
-	network                      config.NetworkConfig
-	cfg                          config.BMEConfig
-	alerter                      alerting.Alerter
-	logger                       *slog.Logger
-	client                       *http.Client
-	consecutiveFailures          int // API unreachable
-	consecutiveHaltedPolls       int // mints or refunds halted
+	network                       config.NetworkConfig
+	cfg                           config.BMEConfig
+	alerter                       alerting.Alerter
+	logger                        *slog.Logger
+	client                        *http.Client
+	consecutiveFailures           int // API unreachable
+	consecutiveHaltedPolls        int // mints or refunds halted
 	consecutiveCollateralBreaches int // ratio below warn or halt threshold
 }
 
@@ -65,7 +66,7 @@ func NewStatusMonitor(
 func (m *StatusMonitor) Run(ctx context.Context) {
 	m.logger.Info("BME status monitor started",
 		"poll_interval", m.cfg.PollInterval.Duration,
-		"endpoint", m.network.AkashAPI+"/akash/bme/v1/status",
+		"nodes", m.network.AkashAPINodes,
 	)
 
 	m.check(ctx)
@@ -98,18 +99,11 @@ type bmeStatusResponse struct {
 }
 
 func (m *StatusMonitor) check(ctx context.Context) {
-	url := m.network.AkashAPI + "/akash/bme/v1/status"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		m.logger.Error("failed to create BME status request", "error", err)
-		return
-	}
-
-	resp, err := m.client.Do(req)
+	resp, err := akashclient.Fetch(ctx, m.client, m.network.AkashAPINodes, "/akash/bme/v1/status")
 	if err != nil {
 		m.consecutiveFailures++
 		m.logger.Error("BME status endpoint unreachable",
-			"url", url,
+			"nodes", m.network.AkashAPINodes,
 			"consecutive_failures", m.consecutiveFailures,
 			"error", err,
 		)
@@ -136,13 +130,14 @@ func (m *StatusMonitor) check(ctx context.Context) {
 			Title:    title,
 			Body: fmt.Sprintf(
 				"Network: %s\n"+
-					"Cannot reach BME status endpoint.\n"+
-					"URL: %s\n"+
+					"Cannot reach BME status endpoint on any configured node.\n"+
+					"Nodes tried: %s\n"+
 					"Consecutive failures: %d\n"+
 					"Error: %s\n\n"+
-					"BME health cannot be verified while this endpoint is down.\n"+
-					"No further alerts will be sent until the endpoint recovers.",
-				m.network.Name, url, m.consecutiveFailures, err.Error(),
+					"BME health cannot be verified while all nodes are down.\n"+
+					"No further alerts will be sent until an endpoint recovers.",
+				m.network.Name, strings.Join(m.network.AkashAPINodes, ", "),
+				m.consecutiveFailures, err.Error(),
 			),
 		})
 		return

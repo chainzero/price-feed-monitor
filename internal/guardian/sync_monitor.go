@@ -29,15 +29,15 @@ type networkState struct {
 //     so a silent RPC outage doesn't mask a real guardian rotation.
 //   - Same tracking for each Akash oracle params endpoint.
 type SyncMonitor struct {
-	cfg           config.GuardianSetConfig
-	eth           *EthereumClient
-	networks      []config.NetworkConfig
-	netStates     map[string]*networkState
-	alerter       alerting.Alerter
-	logger        *slog.Logger
+	cfg            config.GuardianSetConfig
+	eth            *EthereumClient
+	networks       []config.NetworkConfig
+	netStates      map[string]*networkState
+	alerter        alerting.Alerter
+	logger         *slog.Logger
 	lastKnownIndex uint32
-	initialized   bool
-	ethFailures   int
+	initialized    bool
+	ethFailures    int
 }
 
 func NewSyncMonitor(
@@ -193,7 +193,7 @@ func (m *SyncMonitor) compareWithNetwork(
 	syncAlertKey := fmt.Sprintf("guardian_sync_%s", network.Name)
 	akashRPCKey := fmt.Sprintf("akash_params_unreachable_%s", network.Name)
 
-	akashClient := NewAkashOracleClient(network.AkashAPI, network.Name, network.WormholeContract)
+	akashClient := NewAkashOracleClient(network.AkashAPINodes, network.Name, network.WormholeContract)
 	akashAddresses, err := akashClient.GetGuardianAddresses(ctx)
 	if err != nil {
 		state.consecutiveFailures++
@@ -229,12 +229,13 @@ func (m *SyncMonitor) compareWithNetwork(
 			Body: fmt.Sprintf(
 				"Network: %s\n"+
 					"Cannot fetch oracle params to verify guardian set sync.\n"+
-					"API: %s\n"+
+					"Nodes tried: %s\n"+
 					"Consecutive failures: %d\n"+
 					"Error: %s\n\n"+
-					"Guardian set sync cannot be verified while this endpoint is down.\n"+
-					"No further alerts will be sent until the endpoint recovers.",
-				network.Name, network.AkashAPI, state.consecutiveFailures, err.Error(),
+					"Guardian set sync cannot be verified while all nodes are down.\n"+
+					"No further alerts will be sent until an endpoint recovers.",
+				network.Name, strings.Join(network.AkashAPINodes, ", "),
+				state.consecutiveFailures, err.Error(),
 			),
 		})
 		return
