@@ -73,6 +73,10 @@ type GuardianSetConfig struct {
 	PollInterval     Duration `yaml:"poll_interval"`
 	EthereumRPC      string   `yaml:"ethereum_rpc"`
 	WormholeContract string   `yaml:"wormhole_contract"`
+	// EtherscanAPIKey is used to retrieve guardian set upgrade VAAs from Ethereum
+	// transaction calldata when the Wormholescan API does not have them indexed.
+	// Populated from the ETHERSCAN_API_KEY env var — never set directly in config.yaml.
+	EtherscanAPIKey string `yaml:"-"`
 }
 
 // WormholescanConfig configures Component 5: the Wormholescan-based reactive guardian
@@ -126,6 +130,10 @@ type GitHubConfig struct {
 	Enabled      bool     `yaml:"enabled"`
 	Repo         string   `yaml:"repo"`
 	PollInterval Duration `yaml:"poll_interval"`
+	// Token is an optional GitHub personal access token. Unauthenticated requests
+	// are limited to 60/hour; a token raises this to 5000/hour. Not required for
+	// the low polling rates used here but avoids hitting limits in CI environments.
+	Token string `yaml:"token"`
 }
 
 type NetworkConfig struct {
@@ -136,6 +144,11 @@ type NetworkConfig struct {
 	AkashAPINodes    []string        `yaml:"akash_api"`
 	WormholeContract string          `yaml:"wormhole_contract"`
 	HermesRelayers   []RelayerConfig `yaml:"hermes_relayers"`
+	// OperatorAddress is the --from value for akash tx wasm execute when submitting
+	// a guardian set upgrade VAA. Included verbatim in rotation alert commands.
+	OperatorAddress string `yaml:"operator_address"`
+	// ChainID is the Akash chain ID used in the submit_v_a_a command (e.g. "akashnet-2").
+	ChainID string `yaml:"chain_id"`
 }
 
 type RelayerConfig struct {
@@ -198,6 +211,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SENDGRID_API_KEY"); v != "" {
 		cfg.Email.APIKey = v
+	}
+	if v := os.Getenv("ETHERSCAN_API_KEY"); v != "" {
+		cfg.GuardianSetMonitor.EtherscanAPIKey = v
 	}
 
 	if err := cfg.validate(); err != nil {

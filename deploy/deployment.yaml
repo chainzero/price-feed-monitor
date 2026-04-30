@@ -47,6 +47,16 @@ spec:
                   key: sendgrid-api-key
                   optional: true
 
+            # Etherscan API key — used to retrieve guardian set upgrade VAAs from
+            # Ethereum transaction calldata when a guardian rotation is detected.
+            # Optional: if absent, VAA retrieval falls back to Wormholescan.
+            - name: ETHERSCAN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: price-feed-monitor-secrets
+                  key: etherscan-api-key
+                  optional: true
+
           resources:
             requests:
               cpu: 100m

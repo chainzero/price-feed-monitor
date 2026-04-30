@@ -30,12 +30,22 @@ spec:
               value: /etc/price-feed-monitor/config.yaml
 
             # Slack webhook URL — sourced from Secret, overrides the placeholder value
-            # in config.yaml. This is the only credential this app requires.
+            # in config.yaml.
             - name: SLACK_WEBHOOK_URL
               valueFrom:
                 secretKeyRef:
                   name: price-feed-monitor-testnet-secrets
                   key: slack-webhook-url
+
+            # Etherscan API key — used to retrieve guardian set upgrade VAAs from
+            # Ethereum transaction calldata when a guardian rotation is detected.
+            # Optional: if absent, VAA retrieval falls back to Wormholescan.
+            - name: ETHERSCAN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: price-feed-monitor-testnet-secrets
+                  key: etherscan-api-key
+                  optional: true
 
           resources:
             requests:

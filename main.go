@@ -96,16 +96,23 @@ func main() {
 
 	// Component 5: Wormholescan Guardian Set Monitor
 	if cfg.WormholescanMonitor.Enabled {
-		wm := guardian.NewWormholescanMonitor(cfg.WormholescanMonitor, cfg.Networks, alerter, logger)
+		wm := guardian.NewWormholescanMonitor(cfg.WormholescanMonitor, cfg.Networks, cfg.GuardianSetMonitor.EtherscanAPIKey, alerter, logger)
 		go wm.Run(ctx)
 		slog.Info("wormholescan guardian set monitor enabled")
 	}
 
 	// Component 4: Guardian Update Announcements
-	if cfg.AnnouncementMonitor.Enabled && cfg.AnnouncementMonitor.PythForum.Enabled {
-		fm := announcements.NewPythForumMonitor(cfg.AnnouncementMonitor.PythForum, alerter, logger)
-		go fm.Run(ctx)
-		slog.Info("pyth forum monitor enabled")
+	if cfg.AnnouncementMonitor.Enabled {
+		if cfg.AnnouncementMonitor.PythForum.Enabled {
+			fm := announcements.NewPythForumMonitor(cfg.AnnouncementMonitor.PythForum, alerter, logger)
+			go fm.Run(ctx)
+			slog.Info("pyth forum monitor enabled")
+		}
+		if cfg.AnnouncementMonitor.GitHub.Enabled {
+			gm := announcements.NewGitHubGuardianMonitor(cfg.AnnouncementMonitor.GitHub, alerter, logger)
+			go gm.Run(ctx)
+			slog.Info("github guardian monitor enabled", "repo", cfg.AnnouncementMonitor.GitHub.Repo)
+		}
 	}
 
 	// Startup summary + daily health check

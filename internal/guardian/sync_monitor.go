@@ -31,6 +31,8 @@ type networkState struct {
 type SyncMonitor struct {
 	cfg            config.GuardianSetConfig
 	eth            *EthereumClient
+	wormholescan   *WormholescanClient
+	etherscan      *EtherscanClient
 	networks       []config.NetworkConfig
 	netStates      map[string]*networkState
 	alerter        alerting.Alerter
@@ -51,12 +53,14 @@ func NewSyncMonitor(
 		states[n.Name] = &networkState{}
 	}
 	return &SyncMonitor{
-		cfg:       cfg,
-		eth:       NewEthereumClient(cfg.EthereumRPC, cfg.WormholeContract),
-		networks:  networks,
-		netStates: states,
-		alerter:   alerter,
-		logger:    logger.With("component", "guardian_sync"),
+		cfg:          cfg,
+		eth:          NewEthereumClient(cfg.EthereumRPC, cfg.WormholeContract),
+		wormholescan: NewWormholescanClient("https://api.wormholescan.io"),
+		etherscan:    NewEtherscanClient(cfg.EtherscanAPIKey, cfg.WormholeContract),
+		networks:     networks,
+		netStates:    states,
+		alerter:      alerter,
+		logger:       logger.With("component", "guardian_sync"),
 	}
 }
 
@@ -143,20 +147,7 @@ func (m *SyncMonitor) check(ctx context.Context) {
 			"previous_index", m.lastKnownIndex,
 			"new_index", currentIndex,
 		)
-		m.alerter.Send(types.Alert{
-			Key:      "guardian_set_rotation",
-			Severity: types.SeverityCritical,
-			Title:    "WORMHOLE GUARDIAN ROTATION DETECTED",
-			Body: fmt.Sprintf(
-				"The Wormhole mainnet guardian set has rotated.\n\n"+
-					"Previous Index: %d\n"+
-					"New Index: %d\n\n"+
-					"Action Required:\n"+
-					"Submit governance proposal to update guardian addresses.\n"+
-					"Fetching new addresses now — sync check will follow.",
-				m.lastKnownIndex, currentIndex,
-			),
-		})
+		m.sendRotationAlert(ctx, m.lastKnownIndex, currentIndex)
 	} else if !m.initialized {
 		m.logger.Info("guardian set baseline established", "index", currentIndex)
 	}
@@ -285,9 +276,16 @@ func (m *SyncMonitor) compareWithNetwork(
 			fmt.Fprintf(&body, "  %s\n", addr)
 		}
 
-		fmt.Fprintf(&body, "\nAction Required:\n")
-		fmt.Fprintf(&body, "Submit governance proposal to update guardian addresses.\n")
-		fmt.Fprintf(&body, "See: hermes-relayer-setup-guide.md#wormhole-guardian-set-management")
+		// Fetch the VAA so the alert includes a ready-to-run submission command.
+		vaaBase64, _, vaaErr := m.wormholescan.GetUpgradeVAA(ctx, "0000000000000000000000000000000000000000000000000000000000000004", ethIndex)
+		if vaaErr != nil {
+			fmt.Fprintf(&body, "\nCould not retrieve upgrade VAA automatically: %s\n", vaaErr.Error())
+			fmt.Fprintf(&body, "Retrieve manually:\n")
+			fmt.Fprintf(&body, "  curl -s \"https://api.wormholescan.io/api/v1/vaas/1/0000000000000000000000000000000000000000000000000000000000000004?pageSize=5\" | jq -r '.data[0].vaa'\n")
+		} else {
+			fmt.Fprintf(&body, "\nRun this command to update:\n\n")
+			fmt.Fprintf(&body, buildSubmitCommand(network, vaaBase64))
+		}
 
 		m.alerter.Send(types.Alert{
 			Key:      syncAlertKey,
@@ -308,6 +306,58 @@ func (m *SyncMonitor) compareWithNetwork(
 			),
 		)
 	}
+}
+
+func (m *SyncMonitor) sendRotationAlert(ctx context.Context, previousIndex, newIndex uint32) {
+	const governanceEmitter = "0000000000000000000000000000000000000000000000000000000000000004"
+
+	// Etherscan is the primary VAA source — it retrieves from transaction calldata
+	// and is not subject to Wormholescan indexing delays. Wormholescan is the fallback.
+	vaaBase64, vaaErr := m.etherscan.GetGuardianSetUpgradeVAA(ctx, newIndex)
+	var vaaTimestamp string
+	if vaaErr != nil {
+		m.logger.Warn("etherscan VAA retrieval failed, trying wormholescan", "error", vaaErr)
+		vaaBase64, vaaTimestamp, vaaErr = m.wormholescan.GetUpgradeVAA(ctx, governanceEmitter, newIndex)
+	}
+
+	var body strings.Builder
+	fmt.Fprintf(&body,
+		"The Wormhole mainnet guardian set has rotated.\n\n"+
+			"Previous Index: %d\n"+
+			"New Index:      %d\n\n",
+		previousIndex, newIndex,
+	)
+
+	if vaaErr != nil {
+		m.logger.Warn("could not retrieve upgrade VAA", "error", vaaErr)
+		fmt.Fprintf(&body,
+			"WARNING: Could not retrieve upgrade VAA automatically: %s\n\n"+
+				"Retrieve manually:\n"+
+				"  curl -s \"https://api.wormholescan.io/api/v1/vaas/1/%s?pageSize=5\" | jq -r '.data[0].vaa'\n\n",
+			vaaErr.Error(), governanceEmitter,
+		)
+	} else {
+		if vaaTimestamp != "" {
+			fmt.Fprintf(&body, "VAA Published: %s\n\n", vaaTimestamp)
+		}
+		fmt.Fprintf(&body,
+			"PRICE FEED IS DOWN. Submit the VAA immediately for each network.\n\n"+
+				"NOTE: There is NO grace period for live price feeds — prices stopped\n"+
+				"the moment the rotation went live. Act immediately.\n\n",
+		)
+		for _, network := range m.networks {
+			fmt.Fprintf(&body, "--- %s ---\n", strings.ToUpper(network.Name))
+			fmt.Fprintf(&body, buildSubmitCommand(network, vaaBase64))
+			fmt.Fprintf(&body, "\n")
+		}
+	}
+
+	m.alerter.Send(types.Alert{
+		Key:      "guardian_set_rotation",
+		Severity: types.SeverityCritical,
+		Title:    fmt.Sprintf("GUARDIAN SET ROTATION: INDEX %d → %d — PRICE FEED DOWN", previousIndex, newIndex),
+		Body:     body.String(),
+	})
 }
 
 // findMismatches compares two address lists positionally and returns

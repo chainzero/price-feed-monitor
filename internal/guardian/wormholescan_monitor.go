@@ -39,6 +39,7 @@ type WormholescanMonitor struct {
 	cfg                 config.WormholescanConfig
 	networks            []config.NetworkConfig
 	wormholescan        *WormholescanClient
+	etherscan           *EtherscanClient
 	alerter             alerting.Alerter
 	logger              *slog.Logger
 	lastKnownIndex      uint32
@@ -49,6 +50,7 @@ type WormholescanMonitor struct {
 func NewWormholescanMonitor(
 	cfg config.WormholescanConfig,
 	networks []config.NetworkConfig,
+	etherscanAPIKey string,
 	alerter alerting.Alerter,
 	logger *slog.Logger,
 ) *WormholescanMonitor {
@@ -56,6 +58,7 @@ func NewWormholescanMonitor(
 		cfg:          cfg,
 		networks:     networks,
 		wormholescan: NewWormholescanClient(cfg.APIBaseURL),
+		etherscan:    NewEtherscanClient(etherscanAPIKey, "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"),
 		alerter:      alerter,
 		logger:       logger.With("component", "wormholescan_monitor"),
 	}
@@ -176,9 +179,16 @@ func (m *WormholescanMonitor) check(ctx context.Context) {
 }
 
 // sendRotationAlert fetches the governance VAA for the new index and posts a CRITICAL
-// alert containing the truncated VAA and a retrieval link.
+// alert per network containing the full VAA and an exact copy-paste submission command.
 func (m *WormholescanMonitor) sendRotationAlert(ctx context.Context, previousIndex, newIndex uint32) {
-	vaaBase64, vaaTimestamp, vaaErr := m.wormholescan.GetUpgradeVAA(ctx, m.cfg.GovernanceEmitter, newIndex)
+	// Etherscan is the primary VAA source — retrieves from transaction calldata
+	// and is not subject to Wormholescan indexing delays. Wormholescan is the fallback.
+	vaaBase64, vaaErr := m.etherscan.GetGuardianSetUpgradeVAA(ctx, newIndex)
+	var vaaTimestamp string
+	if vaaErr != nil {
+		m.logger.Warn("etherscan VAA retrieval failed, trying wormholescan", "error", vaaErr)
+		vaaBase64, vaaTimestamp, vaaErr = m.wormholescan.GetUpgradeVAA(ctx, m.cfg.GovernanceEmitter, newIndex)
+	}
 
 	var body strings.Builder
 
@@ -189,57 +199,34 @@ func (m *WormholescanMonitor) sendRotationAlert(ctx context.Context, previousInd
 		previousIndex, newIndex,
 	)
 
-	// Include VAA information in the alert. The VAA is the exact signed payload
-	// required by the Akash Wormhole contract's submit_v_a_a execution message.
-	// We truncate to 64 characters here to keep the alert readable; the full VAA
-	// is available via the Wormholescan retrieval link below.
 	if vaaErr != nil {
 		m.logger.Warn("could not retrieve upgrade VAA", "error", vaaErr)
 		fmt.Fprintf(&body,
-			"⚠️  Could not retrieve upgrade VAA: %s\n"+
-				"Retrieve manually from:\n"+
-				"  https://wormholescan.io/guardianset\n\n",
-			vaaErr.Error(),
+			"WARNING: Could not retrieve upgrade VAA automatically: %s\n\n"+
+				"Retrieve manually:\n"+
+				"  curl -s \"https://api.wormholescan.io/api/v1/vaas/1/%s?pageSize=5\" | jq -r '.data[0].vaa'\n\n",
+			vaaErr.Error(), m.cfg.GovernanceEmitter,
 		)
 	} else {
-		// Truncate VAA to first 64 base64 characters (≈48 raw bytes) for readability.
-		// The full VAA is ~1–2 KB of base64; showing just the header is sufficient
-		// to confirm which VAA this is without flooding the Slack message.
-		truncated := vaaBase64
-		if len(truncated) > 64 {
-			truncated = truncated[:64] + "..."
-		}
-		fmt.Fprintf(&body, "Governance VAA (truncated):\n  %s\n\n", truncated)
 		if vaaTimestamp != "" {
-			fmt.Fprintf(&body, "VAA Published: %s\n", vaaTimestamp)
+			fmt.Fprintf(&body, "VAA Published: %s\n\n", vaaTimestamp)
+		}
+		fmt.Fprintf(&body,
+			"PRICE FEED IS DOWN. Submit the VAA immediately for each network.\n\n"+
+				"NOTE: There is NO grace period for live price feeds — prices stopped\n"+
+				"the moment the rotation went live. Act immediately.\n\n",
+		)
+		for _, network := range m.networks {
+			fmt.Fprintf(&body, "--- %s ---\n", strings.ToUpper(network.Name))
+			fmt.Fprintf(&body, buildSubmitCommand(network, vaaBase64))
+			fmt.Fprintf(&body, "\n")
 		}
 	}
-
-	// Wormholescan VAA retrieval link — anyone on the team can use this to get
-	// the full base64 VAA without needing any tooling:
-	//   curl https://api.wormholescan.io/api/v1/vaas/1/{emitter} | jq '.data[0].vaa'
-	fmt.Fprintf(&body,
-		"Full VAA retrieval:\n"+
-			"  https://wormholescan.io/guardianset\n"+
-			"  curl -s \"https://api.wormholescan.io/api/v1/vaas/1/%s?pageSize=5\" | jq -r '.data[0].vaa'\n\n",
-		m.cfg.GovernanceEmitter,
-	)
-
-	fmt.Fprintf(&body,
-		"Action Required:\n"+
-			"1. Retrieve the full VAA using the curl command above.\n"+
-			"2. Submit to the Akash Wormhole contract:\n"+
-			"     akash tx wasm execute <contract> '{\"submit_v_a_a\":{\"vaa\":\"<base64>\"}}' \\\n"+
-			"       --from <key> --chain-id akashnet-2 --gas auto\n"+
-			"3. Confirm oracle params update via /akash/oracle/v1/params.\n\n"+
-			"Grace Period: 86400 seconds (24 hours) from VAA publication.\n"+
-			"Price feed verification WILL FAIL once the old guardian set expires.",
-	)
 
 	m.alerter.Send(types.Alert{
 		Key:      "wormholescan_guardian_rotation",
 		Severity: types.SeverityCritical,
-		Title:    fmt.Sprintf("GUARDIAN SET ROTATION: INDEX %d → %d", previousIndex, newIndex),
+		Title:    fmt.Sprintf("GUARDIAN SET ROTATION: INDEX %d → %d — PRICE FEED DOWN", previousIndex, newIndex),
 		Body:     body.String(),
 	})
 }
@@ -325,12 +312,19 @@ func (m *WormholescanMonitor) compareWithNetwork(
 		fmt.Fprintf(&body, "\n")
 	}
 
-	fmt.Fprintf(&body,
-		"Retrieve the upgrade VAA:\n"+
-			"  curl -s \"https://api.wormholescan.io/api/v1/vaas/1/%s?pageSize=5\" | jq -r '.data[0].vaa'\n\n"+
-			"Then apply via submit_v_a_a — see rotation alert for full instructions.",
-		m.cfg.GovernanceEmitter,
-	)
+	// Fetch the VAA so we can include the ready-to-run command in the alert.
+	vaaBase64, _, vaaErr := m.wormholescan.GetUpgradeVAA(ctx, m.cfg.GovernanceEmitter, globalIndex)
+	if vaaErr != nil {
+		fmt.Fprintf(&body,
+			"Could not retrieve upgrade VAA automatically: %s\n\n"+
+				"Retrieve manually:\n"+
+				"  curl -s \"https://api.wormholescan.io/api/v1/vaas/1/%s?pageSize=5\" | jq -r '.data[0].vaa'\n",
+			vaaErr.Error(), m.cfg.GovernanceEmitter,
+		)
+	} else {
+		fmt.Fprintf(&body, "Run this command to update:\n\n")
+		fmt.Fprintf(&body, buildSubmitCommand(network, vaaBase64))
+	}
 
 	m.alerter.Send(types.Alert{
 		Key:      alertKey,

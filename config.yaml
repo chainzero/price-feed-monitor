@@ -83,14 +83,17 @@ announcement_monitor:
       - "guardian rotation"
       - "guardian key"
   github:
-    enabled: false  # future: GitHub commit monitoring
+    enabled: true
     repo: "wormhole-foundation/wormhole"
     poll_interval: 1h
+    # token: "YOUR_GITHUB_TOKEN"  # optional — raises rate limit from 60 to 5000 req/hour
 
 networks:
   - name: mainnet
     akash_api: "https://rpc.akt.dev/rest"
     wormhole_contract: "akash14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9sggdamt"
+    operator_address: "akash1dq9wvqemmpvanmwsdttajsn4hmtx5zk7j2qcgg"
+    chain_id: "akashnet-2"
     hermes_relayers:
       - name: hermes-relayer-01
         health_endpoint: "https://hermesrelayerprod1.akash.pub/health"
