@@ -2,6 +2,7 @@ package guardian
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -182,20 +183,26 @@ func (c *WormholescanClient) GetUpgradeVAA(ctx context.Context, governanceEmitte
 		return "", "", fmt.Errorf("no governance VAAs found in response")
 	}
 
-	// Search for the VAA signed by guardian set (targetIndex - 1).
-	// This is the governance VAA that upgrades TO targetIndex.
+	// Search for a VAA signed by guardian set (targetIndex - 1) that is a Core
+	// governance guardian set upgrade to targetIndex. Multiple VAAs may share the
+	// same signing index (e.g. DelegatedGuardians VAAs), so we validate each match.
 	signingIndex := targetIndex - 1
 	for _, entry := range result.Data {
-		if entry.GuardianSetIndex == signingIndex {
-			return entry.VAA, entry.Timestamp, nil
+		if entry.GuardianSetIndex != signingIndex {
+			continue
 		}
+		vaaBytes, err := base64.StdEncoding.DecodeString(entry.VAA)
+		if err != nil {
+			continue
+		}
+		if err := validateGuardianSetUpgradeVAA(vaaBytes, targetIndex); err != nil {
+			continue
+		}
+		return entry.VAA, entry.Timestamp, nil
 	}
 
-	// Fallback: if we can't find the exact match (e.g., non-sequential rotation or
-	// response doesn't include it yet), return the most recent VAA with a warning.
-	// The caller logs this situation and includes a note in the alert.
-	return result.Data[0].VAA, result.Data[0].Timestamp, fmt.Errorf(
-		"exact VAA for target index %d (signing index %d) not found — using most recent VAA (signing index %d)",
-		targetIndex, signingIndex, result.Data[0].GuardianSetIndex,
+	return "", "", fmt.Errorf(
+		"no guardian set upgrade VAA found for target index %d (signing index %d) in %d entries",
+		targetIndex, signingIndex, len(result.Data),
 	)
 }

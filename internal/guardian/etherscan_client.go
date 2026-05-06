@@ -1,6 +1,7 @@
 package guardian
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -12,9 +13,10 @@ import (
 	"time"
 )
 
-// submitNewGuardianSetSelector is the first 4 bytes of keccak256("submitNewGuardianSet(bytes)").
+// submitNewGuardianSetSelector is the 4-byte function selector for submitNewGuardianSet(bytes).
+// Computed as the first 4 bytes of keccak256("submitNewGuardianSet(bytes)").
 // Used to identify guardian set upgrade transactions in the Etherscan txlist response.
-const submitNewGuardianSetSelector = "6606b4e0"
+const submitNewGuardianSetSelector = "3bc0aee6"
 
 // EtherscanClient retrieves guardian set upgrade VAAs from Ethereum transaction calldata.
 //
@@ -55,18 +57,19 @@ type etherscanTx struct {
 }
 
 // GetGuardianSetUpgradeVAA searches recent transactions to the Wormhole contract for
-// a submitNewGuardianSet call that upgrades TO targetIndex. Returns the VAA as base64.
+// a submitNewGuardianSet call that upgrades TO targetIndex. Returns the VAA as base64
+// and the Ethereum transaction hash for operator verification.
 //
 // How it works:
 //  1. Fetch the last 50 transactions to the Wormhole contract via Etherscan txlist.
-//  2. Filter for submitNewGuardianSet calls (selector 0x6606b4e0).
+//  2. Filter for submitNewGuardianSet calls (selector 0x3bc0aee6).
 //  3. ABI-decode the `bytes _vm` argument from the calldata.
-//  4. Parse the VAA header: the guardian_set_index field is the SIGNING set (targetIndex-1).
-//     This identifies which VAA corresponds to the desired upgrade.
-//  5. Return the matching VAA bytes as base64.
-func (c *EtherscanClient) GetGuardianSetUpgradeVAA(ctx context.Context, targetIndex uint32) (string, error) {
+//  4. Pre-filter by signing index: for an upgrade TO targetIndex, the signing set is targetIndex-1.
+//  5. Validate the VAA payload: must be Core governance action type 2 targeting targetIndex.
+//  6. Return the matching VAA bytes as base64 and the source transaction hash.
+func (c *EtherscanClient) GetGuardianSetUpgradeVAA(ctx context.Context, targetIndex uint32) (vaaBase64, txHash string, err error) {
 	if c.apiKey == "" {
-		return "", fmt.Errorf("etherscan API key not configured")
+		return "", "", fmt.Errorf("etherscan API key not configured")
 	}
 
 	url := fmt.Sprintf(
@@ -77,21 +80,21 @@ func (c *EtherscanClient) GetGuardianSetUpgradeVAA(ctx context.Context, targetIn
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("etherscan txlist request: %w", err)
+		return "", "", fmt.Errorf("etherscan txlist request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var result etherscanTxListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode etherscan response: %w", err)
+		return "", "", fmt.Errorf("decode etherscan response: %w", err)
 	}
 	if result.Status != "1" {
-		return "", fmt.Errorf("etherscan API error: %s", result.Message)
+		return "", "", fmt.Errorf("etherscan API error: %s", result.Message)
 	}
 
 	signingIndex := targetIndex - 1
@@ -117,13 +120,69 @@ func (c *EtherscanClient) GetGuardianSetUpgradeVAA(ctx context.Context, targetIn
 			continue
 		}
 		vaaSigningIndex := binary.BigEndian.Uint32(vaaBytes[1:5])
-		if vaaSigningIndex == signingIndex {
-			return base64.StdEncoding.EncodeToString(vaaBytes), nil
+		if vaaSigningIndex != signingIndex {
+			continue
 		}
+
+		// Validate the payload is a Core governance guardian set upgrade to targetIndex.
+		// This guards against other governance transaction types (e.g. DelegatedGuardians)
+		// that may share the same signing index but are not guardian set rotation VAAs.
+		if err := validateGuardianSetUpgradeVAA(vaaBytes, targetIndex); err != nil {
+			continue
+		}
+
+		return base64.StdEncoding.EncodeToString(vaaBytes), tx.Hash, nil
 	}
 
-	return "", fmt.Errorf("no submitNewGuardianSet transaction found for target index %d (signing index %d) in last 50 transactions",
+	return "", "", fmt.Errorf("no submitNewGuardianSet transaction found for target index %d (signing index %d) in last 50 transactions",
 		targetIndex, signingIndex)
+}
+
+// validateGuardianSetUpgradeVAA verifies that vaaBytes is a Wormhole Core governance
+// guardian set upgrade VAA that promotes the set to newIndex.
+//
+// VAA layout (all offsets from byte 0):
+//
+//	[0]              version (1 byte)
+//	[1:5]            signing guardian_set_index (4 bytes)
+//	[5]              num_signatures (1 byte)
+//	[6 + i*66]       signature i: guardian_index(1) + sig(65) = 66 bytes each
+//	[6 + n*66]       body: timestamp(4)+nonce(4)+emitter_chain(2)+emitter_addr(32)+sequence(8)+consistency(1)
+//	[6 + n*66 + 51]  payload: module(32)+action(1)+chain(2)+new_gs_index(4)+...
+func validateGuardianSetUpgradeVAA(vaaBytes []byte, newIndex uint32) error {
+	if len(vaaBytes) < 6 {
+		return fmt.Errorf("VAA too short (%d bytes)", len(vaaBytes))
+	}
+	numSigs := int(vaaBytes[5])
+	payloadStart := 6 + numSigs*66 + 51 // header + body (51 = 4+4+2+32+8+1)
+
+	const payloadMinLen = 32 + 1 + 2 + 4 // module + action + chain + new_gs_index
+	if len(vaaBytes) < payloadStart+payloadMinLen {
+		return fmt.Errorf("VAA too short for governance payload (have %d bytes, need %d)",
+			len(vaaBytes), payloadStart+payloadMinLen)
+	}
+
+	payload := vaaBytes[payloadStart:]
+
+	// Core module identifier: 28 zero bytes followed by the ASCII string "Core".
+	var coreModule [32]byte
+	copy(coreModule[28:], []byte("Core"))
+	if !bytes.Equal(payload[:32], coreModule[:]) {
+		return fmt.Errorf("not a Core governance VAA (module: %x)", payload[:32])
+	}
+
+	// Action type 2 = guardian set upgrade (1 = contract upgrade, 3 = set message fee).
+	if payload[32] != 0x02 {
+		return fmt.Errorf("VAA action type %d is not a guardian set upgrade (expected 2)", payload[32])
+	}
+
+	// New guardian set index is at payload[35:39]: after module(32) + action(1) + chain(2).
+	gotIndex := binary.BigEndian.Uint32(payload[35:39])
+	if gotIndex != newIndex {
+		return fmt.Errorf("VAA upgrades to guardian set index %d, expected %d", gotIndex, newIndex)
+	}
+
+	return nil
 }
 
 // decodeVAAFromCalldata decodes the `bytes _vm` ABI argument from submitNewGuardianSet calldata.

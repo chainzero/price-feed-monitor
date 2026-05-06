@@ -183,7 +183,7 @@ func (m *WormholescanMonitor) check(ctx context.Context) {
 func (m *WormholescanMonitor) sendRotationAlert(ctx context.Context, previousIndex, newIndex uint32) {
 	// Etherscan is the primary VAA source — retrieves from transaction calldata
 	// and is not subject to Wormholescan indexing delays. Wormholescan is the fallback.
-	vaaBase64, vaaErr := m.etherscan.GetGuardianSetUpgradeVAA(ctx, newIndex)
+	vaaBase64, ethTxHash, vaaErr := m.etherscan.GetGuardianSetUpgradeVAA(ctx, newIndex)
 	var vaaTimestamp string
 	if vaaErr != nil {
 		m.logger.Warn("etherscan VAA retrieval failed, trying wormholescan", "error", vaaErr)
@@ -208,8 +208,14 @@ func (m *WormholescanMonitor) sendRotationAlert(ctx context.Context, previousInd
 			vaaErr.Error(), m.cfg.GovernanceEmitter,
 		)
 	} else {
+		if ethTxHash != "" {
+			fmt.Fprintf(&body, "Source TX: %s\n", ethTxHash)
+		}
 		if vaaTimestamp != "" {
-			fmt.Fprintf(&body, "VAA Published: %s\n\n", vaaTimestamp)
+			fmt.Fprintf(&body, "VAA Published: %s\n", vaaTimestamp)
+		}
+		if ethTxHash != "" || vaaTimestamp != "" {
+			fmt.Fprintf(&body, "\n")
 		}
 		fmt.Fprintf(&body,
 			"PRICE FEED IS DOWN. Submit the VAA immediately for each network.\n\n"+
