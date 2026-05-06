@@ -21,7 +21,7 @@ spec:
 
       containers:
         - name: price-feed-monitor-sandbox
-          image: scarruthers/price-feed-monitor:v13
+          image: scarruthers/price-feed-monitor:v14
           imagePullPolicy: Always
 
           env:
