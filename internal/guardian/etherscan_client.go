@@ -162,6 +162,13 @@ func validateGuardianSetUpgradeVAA(vaaBytes []byte, newIndex uint32) error {
 			len(vaaBytes), payloadStart+payloadMinLen)
 	}
 
+	// Signing guardian set index must be newIndex-1. Wormhole enforces sequential
+	// rotation, and the Akash contract rejects VAAs signed by an expired set.
+	signingIndex := binary.BigEndian.Uint32(vaaBytes[1:5])
+	if signingIndex != newIndex-1 {
+		return fmt.Errorf("VAA signing index %d does not match expected %d (newIndex-1)", signingIndex, newIndex-1)
+	}
+
 	payload := vaaBytes[payloadStart:]
 
 	// Core module identifier: 28 zero bytes followed by the ASCII string "Core".
